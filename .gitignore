@@ -1,0 +1,53 @@
+# ==================== 环境变量 & 敏感信息 ====================
+.env
+.env.local
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+application-local.yml
+
+# ==================== Python ====================
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+*.egg
+.Python
+
+# ==================== Node / Vite ====================
+node_modules/
+dist/
+dist-ssr/
+*.local
+
+# ==================== Java / Maven ====================
+target/
+!.mvn/wrapper/maven-wrapper.jar
+*.class
+*.jar
+*.war
+
+# ==================== IDE ====================
+.idea/
+*.iml
+*.iws
+*.ipr
+.vscode/
+*.swp
+*.swo
+
+# ==================== 日志 ====================
+logs/
+*.log
+
+# ==================== OS ====================
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ==================== 测试 & 临时文件 ====================
+.pytest_cache/
+*.tmp

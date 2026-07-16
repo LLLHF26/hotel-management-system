@@ -1,0 +1,2 @@
+com.lhf.hotel.common.config.CommonAutoConfiguration
+com.lhf.hotel.common.config.RabbitMqConfig

@@ -1,0 +1,47 @@
+server:
+  port: 8088
+
+spring:
+  main:
+    web-application-type: reactive
+  application:
+    name: gateway-service
+  cloud:
+    nacos:
+      discovery:
+        server-addr: localhost:8848
+      config:
+        enabled: false
+        import-check:
+          enabled: false
+    sentinel:
+      transport:
+        dashboard: localhost:8080
+    gateway:
+      routes:
+        - id: user-service
+          uri: http://localhost:8081
+          predicates:
+            - Path=/api/auth/**,/api/user/**,/api/customer/**
+        - id: room-service
+          uri: http://localhost:8082
+          predicates:
+            - Path=/api/room/**
+        - id: order-service
+          uri: http://localhost:8083
+          predicates:
+            - Path=/api/order/**
+        - id: finance-service
+          uri: http://localhost:8084
+          predicates:
+            - Path=/api/finance/**
+        - id: ai-service
+          uri: http://localhost:8000
+          predicates:
+            - Path=/api/ai/**
+          filters:
+            - DedupeResponseHeader=Access-Control-Allow-Origin Access-Control-Allow-Credentials
+
+logging:
+  kafka:
+    bootstrap-servers: localhost:9091,localhost:9092,localhost:9093
