@@ -14,6 +14,11 @@ spring:
       host: localhost
       password: root
       port: 6379
+  cache:
+    type: redis
+    redis:
+      time-to-live: 600000
+      cache-null-values: false
   cloud:
     nacos:
       discovery:

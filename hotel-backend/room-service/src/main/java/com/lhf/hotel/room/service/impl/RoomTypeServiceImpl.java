@@ -12,6 +12,8 @@ import com.lhf.hotel.room.model.entity.RoomType;
 import com.lhf.hotel.room.model.vo.RoomTypeVO;
 import com.lhf.hotel.room.service.RoomTypeService;
 import com.lhf.hotel.room.support.RoomConverters;
+import org.springframework.cache.annotation.CacheEvict;
+import org.springframework.cache.annotation.Cacheable;
 import org.springframework.stereotype.Service;
 import org.springframework.util.StringUtils;
 
@@ -29,6 +31,8 @@ public class RoomTypeServiceImpl implements RoomTypeService {
     }
 
     @Override
+    @Cacheable(value = "roomTypes", key = "#page + ':' + #size",
+               condition = "!T(org.springframework.util.StringUtils).hasText(#keyword) && !T(org.springframework.util.StringUtils).hasText(#bedType)")
     public PageResult<RoomTypeVO> list(int page, int size, String keyword, String bedType) {
         LambdaQueryWrapper<RoomType> wrapper = new LambdaQueryWrapper<>();
         if (StringUtils.hasText(keyword)) {
@@ -47,6 +51,7 @@ public class RoomTypeServiceImpl implements RoomTypeService {
     }
 
     @Override
+    @Cacheable(value = "roomType", key = "#id")
     public RoomTypeVO getById(Long id) {
         RoomType entity = mapper.selectById(id);
         Assert.notNull(entity, "房型不存在");
@@ -54,6 +59,7 @@ public class RoomTypeServiceImpl implements RoomTypeService {
     }
 
     @Override
+    @CacheEvict(value = {"roomTypes", "roomType"}, allEntries = true)
     public Long create(RoomTypeSaveDTO dto) {
         RoomType entity = new RoomType();
         entity.setName(dto.getName());
@@ -71,6 +77,7 @@ public class RoomTypeServiceImpl implements RoomTypeService {
     }
 
     @Override
+    @CacheEvict(value = {"roomTypes", "roomType"}, allEntries = true)
     public void update(Long id, RoomTypeSaveDTO dto) {
         RoomType entity = mapper.selectById(id);
         Assert.notNull(entity, "房型不存在");
@@ -88,6 +95,7 @@ public class RoomTypeServiceImpl implements RoomTypeService {
     }
 
     @Override
+    @CacheEvict(value = {"roomTypes", "roomType"}, allEntries = true)
     public void delete(Long id) {
         Assert.notNull(mapper.selectById(id), "房型不存在");
         long roomCount = roomMapper.selectCount(
