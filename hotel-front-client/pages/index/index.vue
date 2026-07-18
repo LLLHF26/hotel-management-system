@@ -87,7 +87,7 @@
 </template>
 
 <script>
-import { getRoomTypeList } from '../../src/api/room'
+import { getRoomTypeList, getHotRoomTypes } from '../../src/api/room'
 
 export default {
   data() {
@@ -130,8 +130,8 @@ export default {
   methods: {
     async loadHotRooms() {
       try {
-        const res = await getRoomTypeList({ size: 6 })
-        this.hotRooms = (res.data && res.data.records) ? res.data.records.slice(0, 6) : []
+        const res = await getHotRoomTypes()
+        this.hotRooms = res.data || []
       } catch { /* ignore */ }
     },
     onCheckIn(e) {

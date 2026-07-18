@@ -3,19 +3,25 @@ package com.lhf.hotel.room.controller;
 import com.lhf.hotel.common.result.PageResult;
 import com.lhf.hotel.common.result.Result;
 import com.lhf.hotel.room.model.dto.RoomTypeSaveDTO;
+import com.lhf.hotel.room.model.vo.HotRoomTypeVO;
 import com.lhf.hotel.room.model.vo.RoomTypeVO;
+import com.lhf.hotel.room.service.RoomTypeHotService;
 import com.lhf.hotel.room.service.RoomTypeService;
 import jakarta.validation.Valid;
 import org.springframework.web.bind.annotation.*;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/room/type")
 public class RoomTypeController {
 
     private final RoomTypeService service;
+    private final RoomTypeHotService hotService;
 
-    public RoomTypeController(RoomTypeService service) {
+    public RoomTypeController(RoomTypeService service, RoomTypeHotService hotService) {
         this.service = service;
+        this.hotService = hotService;
     }
 
     /** 房型列表（客户端免登录） */
@@ -53,5 +59,11 @@ public class RoomTypeController {
     public Result<Void> delete(@PathVariable Long id) {
         service.delete(id);
         return Result.ok("删除成功", null);
+    }
+
+    /** 热门房型（客户端免登录，按近30天订单量排名） */
+    @GetMapping("/hot")
+    public Result<List<HotRoomTypeVO>> hot() {
+        return Result.ok(hotService.getHotRoomTypes());
     }
 }

@@ -28,6 +28,7 @@ import com.lhf.hotel.common.util.UserContext;
 import com.lhf.hotel.common.model.vo.ExtraVO;
 import com.lhf.hotel.common.model.vo.OrderVO;
 import com.lhf.hotel.common.model.vo.PaymentVO;
+import com.lhf.hotel.order.model.vo.HotRoomTypeCountVO;
 import com.lhf.hotel.order.service.OrderService;
 import com.lhf.hotel.room.model.vo.RoomTypeVO;
 import com.lhf.hotel.room.model.vo.RoomVO;
@@ -751,5 +752,16 @@ public class OrderServiceImpl implements OrderService {
                 lock.unlock();
             }
         }
+    }
+
+    @Override
+    public List<HotRoomTypeCountVO> getHotRoomTypeCounts(int topN, int days) {
+        LocalDateTime startDate = LocalDateTime.now().minusDays(days);
+        List<Map<String, Object>> rows = ordersMapper.selectHotRoomTypeCounts(startDate, topN);
+        return rows.stream()
+                .map(row -> new HotRoomTypeCountVO(
+                        (String) row.get("roomTypeName"),
+                        ((Number) row.get("orderCount")).longValue()))
+                .toList();
     }
 }

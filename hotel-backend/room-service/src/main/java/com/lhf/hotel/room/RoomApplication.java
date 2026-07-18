@@ -9,7 +9,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = {"com.lhf.hotel.room", "com.lhf.hotel.common"})
 @EnableDiscoveryClient
-@EnableFeignClients(basePackages = "com.lhf.hotel.common.feign")
+@EnableFeignClients(basePackages = {"com.lhf.hotel.common.feign", "com.lhf.hotel.room.feign"})
 @EnableScheduling
 @MapperScan("com.lhf.hotel.room.mapper")
 public class RoomApplication {

@@ -5,6 +5,7 @@ import com.lhf.hotel.order.model.dto.*;
 import com.lhf.hotel.common.model.vo.ExtraVO;
 import com.lhf.hotel.common.model.vo.OrderVO;
 import com.lhf.hotel.common.model.vo.PaymentVO;
+import com.lhf.hotel.order.model.vo.HotRoomTypeCountVO;
 
 import java.util.List;
 import java.util.Map;
@@ -52,4 +53,6 @@ public interface OrderService {
     Map<String, Object> getAvailableRooms(Long roomTypeId, String checkIn, String checkOut);
 
     int autoCancelExpired(int minutes);
+
+    List<HotRoomTypeCountVO> getHotRoomTypeCounts(int topN, int days);
 }

@@ -3,6 +3,7 @@ package com.lhf.hotel.order.controller;
 import com.lhf.hotel.common.result.PageResult;
 import com.lhf.hotel.common.result.Result;
 import com.lhf.hotel.order.model.dto.*;
+import com.lhf.hotel.order.model.vo.HotRoomTypeCountVO;
 import com.lhf.hotel.common.model.vo.OrderVO;
 import com.lhf.hotel.order.service.OrderService;
 import jakarta.validation.Valid;
@@ -87,5 +88,12 @@ public class OrderController {
             @RequestParam String checkIn,
             @RequestParam String checkOut) {
         return Result.ok(orderService.getAvailableRooms(roomTypeId, checkIn, checkOut));
+    }
+
+    @GetMapping("/stats/hot-room-types")
+    public Result<List<HotRoomTypeCountVO>> getHotRoomTypes(
+            @RequestParam(defaultValue = "6") int topN,
+            @RequestParam(defaultValue = "30") int days) {
+        return Result.ok(orderService.getHotRoomTypeCounts(topN, days));
     }
 }
