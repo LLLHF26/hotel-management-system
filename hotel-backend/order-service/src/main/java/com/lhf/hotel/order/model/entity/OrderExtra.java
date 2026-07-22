@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 @TableName("order_extra")
 public class OrderExtra {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private Long orderId;
     private String itemName;

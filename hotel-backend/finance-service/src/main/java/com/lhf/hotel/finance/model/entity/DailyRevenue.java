@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 @TableName("daily_revenue")
 public class DailyRevenue {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private LocalDate date;
     private BigDecimal roomRevenue;

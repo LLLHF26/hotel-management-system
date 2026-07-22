@@ -48,11 +48,11 @@ def _check_llm() -> tuple[str, bool]:
         return "disconnected", False
 
 
-def _check_chroma() -> tuple[str, bool]:
+def _check_vector_store() -> tuple[str, bool]:
     try:
         from core.vector_store import get_vector_store
         store = get_vector_store()
-        store._collection.count()
+        store.count()
         return "connected", True
     except Exception:
         return "disconnected", False
@@ -73,12 +73,12 @@ def _check_gateway() -> tuple[str, bool]:
 async def health():
     llm_status, _ = _check_llm()
     sqlite_status, _ = _check_sqlite()
-    chroma_status, _ = _check_chroma()
+    vector_status, _ = _check_vector_store()
     gateway_status, _ = _check_gateway()
 
     all_up = all(
         s == "connected"
-        for s in [llm_status, sqlite_status, chroma_status]
+        for s in [llm_status, sqlite_status, vector_status]
     )
 
     return Result.ok(
@@ -86,7 +86,7 @@ async def health():
             "status": "UP" if all_up else "DEGRADED",
             "llm_provider": LLM_MODEL,
             "llm_status": llm_status,
-            "chroma_status": chroma_status,
+            "vector_status": vector_status,
             "sqlite_status": sqlite_status,
             "gateway_status": gateway_status,
             "uptime": _format_uptime(),
@@ -114,7 +114,7 @@ async def info():
     try:
         from core.vector_store import get_vector_store
         store = get_vector_store()
-        vector_count = store._collection.count()
+        vector_count = store.count()
     except Exception:
         pass
 

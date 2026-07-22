@@ -11,7 +11,9 @@ export async function getOrderList(params?: any) {
   try {
     const query = qs.toString() ? `?${qs.toString()}` : ''
     const res = await authFetch(`/api/order/list${query}`)
-    return await res.json()
+    const json = await res.json()
+    if (json?.code !== 200) throw new Error(json?.msg || 'order list request failed')
+    return json
   } catch (e) {
     return {
       code: 200,
@@ -24,8 +26,9 @@ export async function getOrderList(params?: any) {
 export async function getOrderById(id: number|string) {
   try {
     const res = await authFetch(`/api/order/${id}`)
-    // console.log('Order by ID response:', await res.json())
-    return await res.json()
+    const json = await res.json()
+    if (json?.code !== 200) throw new Error(json?.msg || 'order detail request failed')
+    return json
   } catch (e) {
     return {
       code: 200,

@@ -13,7 +13,7 @@ import java.time.LocalDateTime;
 @ExcelIgnoreUnannotated
 public class RefundRecord {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     @ExcelProperty(value = "退款ID", index = 0)
     private Long id;
 

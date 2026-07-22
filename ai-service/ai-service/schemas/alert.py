@@ -24,6 +24,14 @@ class AlertStatusResponse(BaseModel):
     unread_count: int
 
 
+class AlertBatchReadRequest(BaseModel):
+    ids: list[int] = Field(..., min_length=1)
+
+
+class AlertBatchDeleteRequest(BaseModel):
+    ids: list[int] = Field(..., min_length=1)
+
+
 class AlertRuleCreate(BaseModel):
     type: str = Field(..., min_length=1, max_length=32)
     threshold: float = Field(..., ge=0, le=1)

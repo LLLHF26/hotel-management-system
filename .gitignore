@@ -51,3 +51,10 @@ Desktop.ini
 # ==================== 测试 & 临时文件 ====================
 .pytest_cache/
 *.tmp
+
+# ==================== 工具/IDE 缓存 ====================
+.workbuddy/
+
+# ==================== 数据库二进制文件 ====================
+ai-service/ai-service/data/chroma/
+ai-service/ai-service/data/*.db

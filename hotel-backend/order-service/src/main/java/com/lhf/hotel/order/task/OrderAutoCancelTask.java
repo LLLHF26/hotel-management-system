@@ -1,5 +1,6 @@
 package com.lhf.hotel.order.task;
 
+import com.lhf.hotel.common.util.SchedulerLock;
 import com.lhf.hotel.order.service.OrderService;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -12,9 +13,15 @@ import org.springframework.stereotype.Component;
 public class OrderAutoCancelTask {
 
     private final OrderService orderService;
+    private final SchedulerLock schedulerLock;
 
     @Scheduled(fixedDelay = 30_000)
     public void autoCancelExpiredOrders() {
+        String lockKey = "scheduler:orderAutoCancel";
+        String owner = schedulerLock.tryLockWithOwner(lockKey, 60);
+        if (owner == null) {
+            return;
+        }
         try {
             int count = orderService.autoCancelExpired(30);
             if (count > 0) {
@@ -22,6 +29,8 @@ public class OrderAutoCancelTask {
             }
         } catch (Exception e) {
             log.error("自动取消超时订单异常", e);
+        } finally {
+            schedulerLock.unlock(lockKey, owner);
         }
     }
 }

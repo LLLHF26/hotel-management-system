@@ -10,7 +10,7 @@ def test_health(client):
     assert data["code"] == 200
     assert data["data"]["status"] in ("UP", "DEGRADED")
     assert "llm_status" in data["data"]
-    assert "chroma_status" in data["data"]
+    assert "vector_status" in data["data"]
     assert "sqlite_status" in data["data"]
 
 

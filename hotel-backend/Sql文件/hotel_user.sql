@@ -10,7 +10,7 @@ USE hotel_user;
 
 -- 1. 员工表
 CREATE TABLE `user` (
-    id          BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '主键',
+    id          BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键（应用层雪花算法，DB层自增兜底）',
     username    VARCHAR(32)     NOT NULL                 COMMENT '登录账号',
     password    VARCHAR(128)    NOT NULL                 COMMENT 'BCrypt 加密密码',
     real_name   VARCHAR(32)     NOT NULL                 COMMENT '真实姓名',
@@ -30,7 +30,7 @@ CREATE TABLE `user` (
 
 -- 2. 会员表
 CREATE TABLE customer (
-    id              BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '主键',
+    id              BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键（应用层雪花算法，DB层自增兜底）',
     real_name       VARCHAR(32)     NOT NULL                 COMMENT '真实姓名',
     id_card         VARCHAR(18)     DEFAULT NULL             COMMENT '身份证号',
     phone           VARCHAR(16)     NOT NULL                 COMMENT '手机号（登录凭证）',
@@ -51,7 +51,7 @@ CREATE TABLE customer (
 
 -- 3. 积分记录表
 CREATE TABLE points_log (
-    id              BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '主键',
+    id              BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键（应用层雪花算法，DB层自增兜底）',
     customer_id     BIGINT          NOT NULL                 COMMENT '会员 ID',
     type            VARCHAR(16)     NOT NULL                 COMMENT 'EARN=获得 CONSUME=消费',
     points          INT             NOT NULL                 COMMENT '变动数值（正=获得 负=消费）',

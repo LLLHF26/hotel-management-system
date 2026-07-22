@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 @TableName("points_log")
 public class PointsLog {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private Long customerId;
     private String type;

@@ -77,6 +77,7 @@ public class FinanceServiceImpl implements FinanceService {
     @Override
     public RevenueSummaryVO revenueSummary() {
         LocalDate now = LocalDate.now();
+        LocalDate yesterday = now.minusDays(1);
         // 获取今年第一天
         LocalDate firstDayOfYear = LocalDate.of(now.getYear(), 1, 1);
         // 获取明年第一天（作为结束边界）
@@ -92,20 +93,17 @@ public class FinanceServiceImpl implements FinanceService {
         }
         // 这里认为数据库的数据全是按天统计的，所以这里直接取第一个
         List<DailyRevenue> todayRevenue = thisYearRevenue.stream().filter(revenue -> revenue.getDate().equals(now)).toList();
+        List<DailyRevenue> yesterdayRevenue = thisYearRevenue.stream().filter(revenue -> revenue.getDate().equals(yesterday)).toList();
         List<DailyRevenue> thisMonthRevenue = thisYearRevenue.stream().filter(revenue -> revenue.getDate().getMonth().equals(now.getMonth())).toList();
         TodaySummary today = null;
         if(!todayRevenue.isEmpty()){
-            today = TodaySummary.builder()
-                    .date(now.toString())
-                    .roomRevenue(todayRevenue.getFirst().getRoomRevenue())
-                    .extraRevenue(todayRevenue.getFirst().getExtraRevenue())
-                    .totalRevenue(todayRevenue.getFirst().getTotalRevenue())
-                    .orderCount(todayRevenue.getFirst().getOrderCount())
-                    .checkInCount(todayRevenue.getFirst().getCheckInCount())
-                    .checkOutCount(todayRevenue.getFirst().getCheckOutCount())
-                    .occupancyRate(String.format("%.2f%%",
-                            (todayRevenue.getFirst().getCheckInCount() * 100.0) / todayRevenue.getFirst().getOrderCount())) // 不知道谁的增长率
-                    .build();
+            DailyRevenue tr = todayRevenue.getFirst();
+            today = buildTodaySummary(tr, now);
+        }
+        TodaySummary yesterdaySummary = null;
+        if(!yesterdayRevenue.isEmpty()){
+            DailyRevenue yr = yesterdayRevenue.getFirst();
+            yesterdaySummary = buildTodaySummary(yr, yesterday);
         }
 
         DailyRevenue message = new DailyRevenue();
@@ -147,6 +145,7 @@ public class FinanceServiceImpl implements FinanceService {
 
         return RevenueSummaryVO.builder()
                 .today(today)
+                .yesterday(yesterdaySummary)
                 .thisMonth(thisMonth)
                 .thisYear(thisYear)
                 .build();
@@ -178,6 +177,9 @@ public class FinanceServiceImpl implements FinanceService {
 
     @Override
     public List<MonthlyRevenueItemVO> revenueMonthly(Integer year) {
+        if (year == null) {
+            year = java.time.Year.now().getValue();
+        }
         List<DailyRevenue> dailyRevenue = dailyRevenueMapper.selectList(new QueryWrapper<DailyRevenue>().eq("YEAR(date)", year));
         List<MonthlyRevenueItemVO> monthlyRevenueItemVOList = new ArrayList<>();
         monthlyRevenueItemVOList.add(MonthlyRevenueItemVO.builder().build());
@@ -228,20 +230,47 @@ public class FinanceServiceImpl implements FinanceService {
     @Override
     public PageResult<RevenueDetailVO> revenueDetail(Integer page, Integer size, String startDate, String endDate,
                                                      String paymentMethod, String orderNo, String roomNumber) {
-        Result<List<PaymentVO>> payments =paymentFeignClient.getPayments(Long.valueOf(orderNo));
-        List<PaymentVO> paymentVOList = startDate.isEmpty()?payments.getData():payments.getData().stream().filter(paymentVO ->
-                paymentVO.getPaidAt().isAfter(LocalDateTime.parse(startDate))).toList();
-        paymentVOList = endDate.isEmpty()?paymentVOList:paymentVOList.stream().filter(paymentVO ->
-                paymentVO.getPaidAt().isBefore(LocalDateTime.parse(endDate))).toList();
-        paymentVOList = paymentMethod.isEmpty()?paymentVOList:paymentVOList.stream().filter(paymentVO ->
-                paymentVO.getMethod().equals(paymentMethod)).toList();
-        paymentVOList = orderNo.isEmpty()?paymentVOList:paymentVOList.stream().filter(paymentVO ->
-                paymentVO.getPaymentNo().equals(orderNo)).toList();
-        PageResult<RevenueDetailVO> message = PageResult.of(0, page, size, Collections.emptyList());
-        for(int i = (page-1)*size; i < Math.min(i + size, paymentVOList.size()); i++){
-            RevenueDetailVO revenueDetailVO = RevenueDetailVO.builder().build();
-            BeanUtil.copyProperties(paymentVOList.get(i), revenueDetailVO);
-            message.getRecords().add(revenueDetailVO);
+        List<PaymentVO> paymentVOList;
+        if (StrUtil.isNotBlank(orderNo)) {
+            paymentVOList = Optional.ofNullable(paymentFeignClient.getPayments(Long.valueOf(orderNo)))
+                    .map(Result::getData).orElse(Collections.emptyList());
+        } else if (StrUtil.isNotBlank(startDate) && StrUtil.isNotBlank(endDate)) {
+            paymentVOList = Optional.ofNullable(paymentFeignClient.getPaymentsByTime(startDate, endDate))
+                    .map(Result::getData).orElse(Collections.emptyList());
+        } else {
+            paymentVOList = Collections.emptyList();
+        }
+
+        if (StrUtil.isNotBlank(startDate)) {
+            LocalDateTime start = LocalDateTime.parse(startDate);
+            paymentVOList = paymentVOList.stream()
+                    .filter(p -> p.getPaidAt() != null && p.getPaidAt().isAfter(start))
+                    .toList();
+        }
+        if (StrUtil.isNotBlank(endDate)) {
+            LocalDateTime end = LocalDateTime.parse(endDate);
+            paymentVOList = paymentVOList.stream()
+                    .filter(p -> p.getPaidAt() != null && p.getPaidAt().isBefore(end))
+                    .toList();
+        }
+        if (StrUtil.isNotBlank(paymentMethod)) {
+            paymentVOList = paymentVOList.stream()
+                    .filter(p -> paymentMethod.equals(p.getMethod()))
+                    .toList();
+        }
+        if (StrUtil.isNotBlank(orderNo)) {
+            paymentVOList = paymentVOList.stream()
+                    .filter(p -> orderNo.equals(p.getPaymentNo()))
+                    .toList();
+        }
+
+        int start = (page - 1) * size;
+        int end = Math.min(start + size, paymentVOList.size());
+        PageResult<RevenueDetailVO> message = PageResult.of(paymentVOList.size(), page, size, Collections.emptyList());
+        for (int i = start; i < end; i++) {
+            RevenueDetailVO vo = RevenueDetailVO.builder().build();
+            BeanUtil.copyProperties(paymentVOList.get(i), vo);
+            message.getRecords().add(vo);
         }
         return message;
     }
@@ -722,14 +751,22 @@ public class FinanceServiceImpl implements FinanceService {
         if (CollectionUtils.isEmpty(orders)) {
             return RevenueSummaryVO.builder()
                     .today(TodaySummary.builder().build())
+                    .yesterday(TodaySummary.builder().build())
                     .thisMonth(MonthSummary.builder().build())
                     .thisYear(YearSummary.builder().build())
                     .build();
         }
 
+        LocalDate yesterday = now.minusDays(1);
+
         // 今日订单（按入住日期）
         List<OrderVO> todayOrders = orders.stream()
                 .filter(o -> o.getCheckInDate() != null && o.getCheckInDate().equals(now))
+                .toList();
+
+        // 昨日订单
+        List<OrderVO> yesterdayOrders = orders.stream()
+                .filter(o -> o.getCheckInDate() != null && o.getCheckInDate().equals(yesterday))
                 .toList();
 
         // 本月订单
@@ -742,20 +779,13 @@ public class FinanceServiceImpl implements FinanceService {
         // 今日汇总
         TodaySummary today = null;
         if (!todayOrders.isEmpty()) {
-            BigDecimal todayRoomRev = sumField(todayOrders, OrderVO::getRoomTotal);
-            BigDecimal todayExtraRev = sumField(todayOrders, OrderVO::getExtraTotal);
-            int todayCheckIn = (int) todayOrders.stream().filter(o -> o.getActualCheckIn() != null).count();
-            int todayCheckOut = (int) todayOrders.stream().filter(o -> o.getActualCheckOut() != null).count();
-            today = TodaySummary.builder()
-                    .date(now.toString())
-                    .roomRevenue(todayRoomRev)
-                    .extraRevenue(todayExtraRev)
-                    .totalRevenue(todayRoomRev.add(todayExtraRev))
-                    .orderCount(todayOrders.size())
-                    .checkInCount(todayCheckIn)
-                    .checkOutCount(todayCheckOut)
-                    .occupancyRate("0.00%")
-                    .build();
+            today = buildTodaySummaryFromOrders(todayOrders, now);
+        }
+
+        // 昨日汇总
+        TodaySummary yesterdaySummary = null;
+        if (!yesterdayOrders.isEmpty()) {
+            yesterdaySummary = buildTodaySummaryFromOrders(yesterdayOrders, yesterday);
         }
 
         // 本月汇总
@@ -787,8 +817,48 @@ public class FinanceServiceImpl implements FinanceService {
 
         return RevenueSummaryVO.builder()
                 .today(today)
+                .yesterday(yesterdaySummary)
                 .thisMonth(thisMonth)
                 .thisYear(thisYear)
+                .build();
+    }
+
+    private TodaySummary buildTodaySummaryFromOrders(List<OrderVO> dayOrders, LocalDate date) {
+        BigDecimal roomRev = sumField(dayOrders, OrderVO::getRoomTotal);
+        BigDecimal extraRev = sumField(dayOrders, OrderVO::getExtraTotal);
+        // 今日入住：当天计划入住房（checkInDate == 今天），非仅已实际办理入住的
+        int checkIn = (int) dayOrders.stream()
+                .filter(o -> o.getCheckInDate() != null && date.equals(o.getCheckInDate()))
+                .count();
+        // 今日退房：当天计划退房（checkOutDate == 今天）
+        int checkOut = (int) dayOrders.stream()
+                .filter(o -> o.getCheckOutDate() != null && date.equals(o.getCheckOutDate()))
+                .count();
+        return TodaySummary.builder()
+                .date(date.toString())
+                .roomRevenue(roomRev)
+                .extraRevenue(extraRev)
+                .totalRevenue(roomRev.add(extraRev))
+                .orderCount(dayOrders.size())
+                .checkInCount(checkIn)
+                .checkOutCount(checkOut)
+                .occupancyRate("0.00%")
+                .build();
+    }
+
+    private TodaySummary buildTodaySummary(DailyRevenue revenue, LocalDate date) {
+        return TodaySummary.builder()
+                .date(date.toString())
+                .roomRevenue(revenue.getRoomRevenue())
+                .extraRevenue(revenue.getExtraRevenue())
+                .totalRevenue(revenue.getTotalRevenue())
+                .orderCount(revenue.getOrderCount())
+                .checkInCount(revenue.getCheckInCount())
+                .checkOutCount(revenue.getCheckOutCount())
+                .occupancyRate(String.format("%.2f%%",
+                        (revenue.getOrderCount() == null || revenue.getOrderCount() == 0)
+                                ? 0.0
+                                : (revenue.getCheckInCount() * 100.0) / revenue.getOrderCount()))
                 .build();
     }
 

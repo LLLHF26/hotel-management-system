@@ -7,3 +7,17 @@ export function getAlertStatus() {
     method: 'GET',
   })
 }
+
+export function markAlertAsRead(alertId: number) {
+  return aiRequest<void>({
+    url: `/api/ai/alert/${alertId}/read`,
+    method: 'PUT',
+  })
+}
+
+export function markAllAlertsAsRead() {
+  return aiRequest<void>({
+    url: '/api/ai/alert/read-all',
+    method: 'PUT',
+  })
+}

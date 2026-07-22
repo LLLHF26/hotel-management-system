@@ -13,11 +13,9 @@ import org.springframework.http.MediaType;
 import org.springframework.web.server.ServerWebExchange;
 import reactor.core.publisher.Mono;
 
+import java.net.ConnectException;
 import java.nio.charset.StandardCharsets;
 
-/**
- * 网关全局异常处理 — 处理路由失败、连接超时、服务不可用等异常
- */
 @Order(-1)
 @Configuration
 public class GatewayExceptionHandler implements ErrorWebExceptionHandler {
@@ -26,15 +24,25 @@ public class GatewayExceptionHandler implements ErrorWebExceptionHandler {
 
     @Override
     public Mono<Void> handle(ServerWebExchange exchange, Throwable ex) {
-        log.error("网关异常 — path={} error={}", exchange.getRequest().getURI().getPath(), ex.getMessage());
+        String path = exchange.getRequest().getURI().getPath();
+        Throwable cause = ex;
+        while (cause != null) {
+            if (cause instanceof ConnectException) {
+                log.warn("下游服务不可用 — path={} msg={}", path, cause.getMessage());
+                return writeResponse(exchange, HttpStatus.SERVICE_UNAVAILABLE, 503, "服务暂时不可用，请稍后重试");
+            }
+            cause = cause.getCause();
+        }
 
-        exchange.getResponse().setStatusCode(HttpStatus.INTERNAL_SERVER_ERROR);
+        log.error("网关异常 — path={}", path, ex);
+        return writeResponse(exchange, HttpStatus.INTERNAL_SERVER_ERROR, 500, "服务器内部错误");
+    }
+
+    private Mono<Void> writeResponse(ServerWebExchange exchange, HttpStatus status, int code, String msg) {
+        exchange.getResponse().setStatusCode(status);
         exchange.getResponse().getHeaders().setContentType(MediaType.APPLICATION_JSON);
-
-        Result<Void> result = Result.fail(500, "服务暂时不可用，请稍后重试");
-        byte[] bytes = JSON.toJSONString(result).getBytes(StandardCharsets.UTF_8);
+        byte[] bytes = JSON.toJSONString(Result.fail(code, msg)).getBytes(StandardCharsets.UTF_8);
         DataBuffer buffer = exchange.getResponse().bufferFactory().wrap(bytes);
-
         return exchange.getResponse().writeWith(Mono.just(buffer));
     }
 }

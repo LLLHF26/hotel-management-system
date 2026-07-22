@@ -2,6 +2,7 @@ package com.lhf.hotel.order.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
 import com.baomidou.mybatisplus.core.conditions.query.QueryWrapper;
+import com.baomidou.mybatisplus.core.toolkit.Wrappers;
 import com.baomidou.mybatisplus.core.metadata.IPage;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.lhf.hotel.common.dto.RoomStatusChangeDTO;
@@ -24,27 +25,30 @@ import com.lhf.hotel.order.model.dto.*;
 import com.lhf.hotel.order.model.entity.OrderExtra;
 import com.lhf.hotel.order.model.entity.Orders;
 import com.lhf.hotel.order.model.entity.Payment;
+import com.lhf.hotel.order.model.entity.Product;
 import com.lhf.hotel.common.util.UserContext;
 import com.lhf.hotel.common.model.vo.ExtraVO;
 import com.lhf.hotel.common.model.vo.OrderVO;
 import com.lhf.hotel.common.model.vo.PaymentVO;
 import com.lhf.hotel.order.model.vo.HotRoomTypeCountVO;
+import com.lhf.hotel.order.model.vo.ProductOrderVO;
 import com.lhf.hotel.order.service.OrderService;
 import com.lhf.hotel.room.model.vo.RoomTypeVO;
 import com.lhf.hotel.room.model.vo.RoomVO;
 import com.lhf.hotel.user.model.vo.CustomerVO;
-import io.seata.spring.annotation.GlobalTransactional;
 import jakarta.annotation.Resource;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
 import org.springframework.amqp.rabbit.core.RabbitTemplate;
+import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
+import java.util.stream.Collectors;
 import java.time.LocalDateTime;
 import java.time.temporal.ChronoUnit;
 import java.util.*;
@@ -73,11 +77,24 @@ public class OrderServiceImpl implements OrderService {
     @Resource
     private FinanceRefundFeignClient financeRefundFeignClient;
 
+    // feign调用system-service（读取积分抵扣比例）
+    @Resource
+    private com.lhf.hotel.order.feign.systemService.SystemSettingFeignClient settingFeignClient;
+
+    @Resource
+    private com.lhf.hotel.order.model.mapper.ProductMapper productMapper;
+
+    /** 积分抵扣默认比例：1 积分可抵扣的金额（元） */
+    private static final BigDecimal DEFAULT_POINTS_RATIO = new BigDecimal("0.1");
+
     @Resource
     private RedissonClient redissonClient;
 
     @Resource
     private RabbitTemplate rabbitTemplate;
+
+    @Resource
+    private StringRedisTemplate stringRedisTemplate;
 
     @Override
     public PageResult<OrderVO> list(Integer page, Integer size, String status, String customerPhone,
@@ -115,8 +132,18 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @GlobalTransactional(rollbackFor = Exception.class)
-    public Map<String, Object> create(OrderCreateDTO dto) {
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> create(OrderCreateDTO dto, String idempotencyKey) {
+        // 0. 幂等性校验
+        if (idempotencyKey != null && !idempotencyKey.isBlank()) {
+            String idemRedisKey = "idempotency:order:create:" + idempotencyKey;
+            Boolean claimed = stringRedisTemplate.opsForValue()
+                    .setIfAbsent(idemRedisKey, "1", 24, TimeUnit.HOURS);
+            if (Boolean.FALSE.equals(claimed)) {
+                throw new BusinessException(409, "重复请求，幂等键已被使用");
+            }
+        }
+
         // 1. 校验 checkOutDate > checkInDate
         LocalDate checkIn = LocalDate.parse(dto.getCheckInDate());
         LocalDate checkOut = LocalDate.parse(dto.getCheckOutDate());
@@ -142,7 +169,7 @@ public class OrderServiceImpl implements OrderService {
             String lockKey = "lock:room:" + roomId;
             RLock lock = redissonClient.getLock(lockKey);
             try {
-                boolean isLock = lock.tryLock(0, 30, TimeUnit.SECONDS);
+                boolean isLock = lock.tryLock(5, 30, TimeUnit.SECONDS);
                 if (!isLock) {
                     // 释放已锁定的房间
                     unlockRooms(lockedRoomIds);
@@ -157,19 +184,26 @@ public class OrderServiceImpl implements OrderService {
         }
 
         // 5. 确定会员ID
-        Long customerId = dto.getCustomerId() != null ? dto.getCustomerId() : UserContext.getUserId();
+        // 注意：统一使用登录用户（从 token 解析，Java 侧 Long 精确），不要信任前端传来的 customerId。
+        // 前端 Storage 里的 customerId 是 19 位雪花 ID，经 JSON.parse 会精度丢失变成另一个数，
+        // 直接用会导致 user-service 查不到会员（404）。token 由后端签发/解析，不存在精度问题。
+        Long customerId = UserContext.getUserId();
         if (customerId == null) {
             unlockRooms(lockedRoomIds);
-            throw new BusinessException(400, "会员不能为空");
+            throw new BusinessException(400, "会员不能为空，请先登录");
         }
 
         Result<CustomerVO> customerVOResult = userFeignClient.detail(customerId);
         CustomerVO customer = customerVOResult.getData();
+        if (customer == null) {
+            unlockRooms(lockedRoomIds);
+            throw new BusinessException(404, "会员不存在");
+        }
         Result<RoomTypeVO> roomTypeResult = roomTypeFeignClient.detail(dto.getRoomTypeId());
         RoomTypeVO roomType = roomTypeResult.getData();
         int nights = (int) ChronoUnit.DAYS.between(checkIn, checkOut);
 
-        // 6. 为每间房创建订单
+        // 6. 为每间房创建订单（先写入订单，再修改房态）
         Long firstOrderId = null;
         String firstOrderNo = null;
         for (RoomVO roomVO : availableRooms) {
@@ -183,9 +217,6 @@ public class OrderServiceImpl implements OrderService {
                 String rn = currentRoom != null ? currentRoom.getRoomNumber() : roomId.toString();
                 throw new BusinessException(400, "房间 " + rn + " 已被预订");
             }
-
-            RoomStatusChangeDTO changeDTO = new RoomStatusChangeDTO(RoomStatus.预订中.name(), "订单创建");
-            roomFeignClient.changeStatus(roomId, changeDTO);
 
             String orderNo = SnowflakeIdUtil.generateOrderNo();
             Orders order = new Orders();
@@ -211,7 +242,22 @@ public class OrderServiceImpl implements OrderService {
             order.setStatus(OrderStatus.待支付.name());
             order.setSource(OrderSource.ONLINE.name());
             order.setRemark(dto.getRemark());
+            // 先写入订单（本地事务保护）
             ordersMapper.insert(order);
+
+            // 再调用远程服务修改房态（带重试）
+            try {
+                RoomStatusChangeDTO changeDTO = new RoomStatusChangeDTO(RoomStatus.预订中.name(), "订单创建");
+                retryOnFeignException(2, 200, "修改房间状态 roomId=" + roomId,
+                        () -> roomFeignClient.changeStatus(roomId, changeDTO));
+            } catch (Exception e) {
+                // 补偿：房态修改失败，将订单置为已取消
+                log.warn("修改房间状态失败，订单 {} 将被取消: {}", orderNo, e.getMessage());
+                order.setStatus(OrderStatus.已取消.name());
+                ordersMapper.updateById(order);
+                unlockRooms(lockedRoomIds);
+                throw new BusinessException(500, "预订过程中房间状态更新失败，订单已取消");
+            }
 
             if (firstOrderId == null) {
                 firstOrderId = order.getId();
@@ -241,7 +287,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @GlobalTransactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
     public void cancel(Long id, OrderCancelDTO dto) {
         Orders order = ordersMapper.selectById(id);
         if (order == null) {
@@ -252,7 +298,9 @@ public class OrderServiceImpl implements OrderService {
         }
         order.setStatus(OrderStatus.已取消.name());
         ordersMapper.updateById(order);
-        roomFeignClient.changeStatus(order.getRoomId(), new RoomStatusChangeDTO(RoomStatus.空闲中.name(), "订单取消"));
+        retryOnFeignException(2, 200, "取消订单-修改房间状态 roomId=" + order.getRoomId(),
+                () -> roomFeignClient.changeStatus(order.getRoomId(),
+                        new RoomStatusChangeDTO(RoomStatus.空闲中.name(), "订单取消")));
 
         OrderCancelledEvent event = OrderCancelledEvent.builder()
             .orderId(order.getId()).orderNo(order.getOrderNo())
@@ -265,7 +313,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @GlobalTransactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
     public void checkIn(Long id, CheckInDTO dto) {
         Orders order = ordersMapper.selectById(id);
         if (order == null) {
@@ -280,7 +328,9 @@ public class OrderServiceImpl implements OrderService {
             order.setDeposit(dto.getDeposit());
         }
         ordersMapper.updateById(order);
-        roomFeignClient.changeStatus(order.getRoomId(), new RoomStatusChangeDTO(RoomStatus.入住中.name(), "办理入住"));
+        retryOnFeignException(2, 200, "办理入住-修改房间状态 roomId=" + order.getRoomId(),
+                () -> roomFeignClient.changeStatus(order.getRoomId(),
+                        new RoomStatusChangeDTO(RoomStatus.入住中.name(), "办理入住")));
 
         OrderCheckInEvent event = OrderCheckInEvent.builder()
             .orderId(order.getId()).orderNo(order.getOrderNo())
@@ -293,7 +343,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @GlobalTransactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
     public void checkout(Long id, CheckOutDTO dto) {
         Orders order = ordersMapper.selectById(id);
         if (order == null) {
@@ -305,7 +355,9 @@ public class OrderServiceImpl implements OrderService {
         order.setActualCheckOut(LocalDateTime.now());
         order.setStatus(OrderStatus.已完成.name());
         ordersMapper.updateById(order);
-        roomFeignClient.changeStatus(order.getRoomId(), new RoomStatusChangeDTO(RoomStatus.待清洁中.name(), "办理退房"));
+        retryOnFeignException(2, 200, "办理退房-修改房间状态 roomId=" + order.getRoomId(),
+                () -> roomFeignClient.changeStatus(order.getRoomId(),
+                        new RoomStatusChangeDTO(RoomStatus.待清洁中.name(), "办理退房")));
 
         int earnedPoints = order.getTotalAmount().intValue();
         OrderCheckoutEvent event = OrderCheckoutEvent.builder()
@@ -353,7 +405,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @GlobalTransactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> changeRoom(Long id, ChangeRoomDTO dto) {
         Orders order = ordersMapper.selectById(id);
         if (order == null) {
@@ -365,6 +417,30 @@ public class OrderServiceImpl implements OrderService {
         if (dto.getNewRoomId().equals(order.getRoomId())) {
             throw new BusinessException(400, "新旧房间相同");
         }
+
+        // 解析并校验可选的换房时间段
+        LocalDate effectiveStart = order.getCheckInDate();
+        LocalDate effectiveEnd = order.getCheckOutDate();
+        boolean hasCustomRange = false;
+        if (dto.getStartDate() != null && !dto.getStartDate().isBlank()) {
+            LocalDate reqStart = LocalDate.parse(dto.getStartDate());
+            if (reqStart.isBefore(order.getCheckInDate()) || reqStart.isAfter(order.getCheckOutDate())) {
+                throw new BusinessException(400,
+                    "换房起始日期必须在订单入住日期(" + order.getCheckInDate()
+                    + ")和退房日期(" + order.getCheckOutDate() + ")之间");
+            }
+            effectiveStart = reqStart;
+            hasCustomRange = true;
+        }
+        if (dto.getEndDate() != null && !dto.getEndDate().isBlank()) {
+            LocalDate reqEnd = LocalDate.parse(dto.getEndDate());
+            if (reqEnd.isBefore(effectiveStart) || reqEnd.isAfter(order.getCheckOutDate())) {
+                throw new BusinessException(400, "换房结束日期必须在换房起始日期和订单退房日期之间");
+            }
+            effectiveEnd = reqEnd;
+            hasCustomRange = true;
+        }
+
         // ==================== 加分布式锁（防止并发换房）====================
         // 锁粒度：新房ID（最关键资源）
         String lockKey = "lock:room:" + dto.getNewRoomId();
@@ -372,7 +448,7 @@ public class OrderServiceImpl implements OrderService {
 
         try {
             // 立即获取锁，30秒自动释放
-            boolean locked = lock.tryLock(0, 30, TimeUnit.SECONDS);
+            boolean locked = lock.tryLock(5, 30, TimeUnit.SECONDS);
             if (!locked) {
                 throw new BusinessException(400, "换房操作冲突，请稍后重试");
             }
@@ -396,19 +472,22 @@ public class OrderServiceImpl implements OrderService {
 
             // ==================== 关键：状态修改顺序必须正确 ====================
             // 6. 先占用新房（空闲中 → 预订中 → 入住中，按合法跳转分两步）
-            roomFeignClient.changeStatus(
-                    dto.getNewRoomId(),
-                    new RoomStatusChangeDTO(RoomStatus.预订中.name(), "换房预定")
+            retryOnFeignException(2, 200, "换房-预订新房 roomId=" + dto.getNewRoomId(),
+                    () -> roomFeignClient.changeStatus(
+                            dto.getNewRoomId(),
+                            new RoomStatusChangeDTO(RoomStatus.预订中.name(), "换房预定"))
             );
-            roomFeignClient.changeStatus(
-                    dto.getNewRoomId(),
-                    new RoomStatusChangeDTO(RoomStatus.入住中.name(), "换房入住")
+            retryOnFeignException(2, 200, "换房-入住新房 roomId=" + dto.getNewRoomId(),
+                    () -> roomFeignClient.changeStatus(
+                            dto.getNewRoomId(),
+                            new RoomStatusChangeDTO(RoomStatus.入住中.name(), "换房入住"))
             );
 
             // 7. 再释放旧房间（入住中 → 待清洁中）
-            roomFeignClient.changeStatus(
-                    order.getRoomId(),
-                    new RoomStatusChangeDTO(RoomStatus.待清洁中.name(), "换房腾出")
+            retryOnFeignException(2, 200, "换房-腾出旧房 roomId=" + order.getRoomId(),
+                    () -> roomFeignClient.changeStatus(
+                            order.getRoomId(),
+                            new RoomStatusChangeDTO(RoomStatus.待清洁中.name(), "换房腾出"))
             );
 
             // 8. 更新订单信息（只更新房间相关字段，避免覆盖订单id和orderNo）
@@ -432,11 +511,14 @@ public class OrderServiceImpl implements OrderService {
                 .timestamp(LocalDateTime.now()).build();
             publishEvent(event, "order.roomChanged");
 
-            return Map.of(
-                    "oldRoomNumber", oldRoomNumber,
-                    "newRoomNumber", order.getRoomNumber(),
-                    "priceDiff", priceDiff
-            );
+            Map<String, Object> result = new java.util.LinkedHashMap<>();
+            result.put("oldRoomNumber", oldRoomNumber);
+            result.put("newRoomNumber", order.getRoomNumber());
+            result.put("priceDiff", priceDiff);
+            if (hasCustomRange) {
+                result.put("changeDateRange", effectiveStart + " ~ " + effectiveEnd);
+            }
+            return result;
 
         } catch (InterruptedException e) {
             Thread.currentThread().interrupt();
@@ -452,9 +534,16 @@ public class OrderServiceImpl implements OrderService {
     @Override
     @Transactional
     public Map<String, Object> pay(Long id, PayDTO dto) {
+        log.info("【支付请求】orderId={}, amount={}, method={}", id, dto.getAmount(), dto.getMethod());
         Orders order = ordersMapper.selectById(id);
         if (order == null) {
-            throw new BusinessException(404, "订单不存在");
+            // 尝试按 orderNo 查询
+            order = ordersMapper.selectOne(new QueryWrapper<Orders>().eq("order_no", String.valueOf(id)));
+            if (order == null) {
+                log.warn("【支付失败】订单不存在，id={}, 已尝试按 orderNo 查询", id);
+                throw new BusinessException(404, "订单不存在（id=" + id + "）");
+            }
+            log.info("【支付】按 orderNo={} 找到订单，实际id={}", id, order.getId());
         }
         String paymentNo = SnowflakeIdUtil.generatePaymentNo();
 
@@ -492,7 +581,7 @@ public class OrderServiceImpl implements OrderService {
     }
 
     @Override
-    @GlobalTransactional(rollbackFor = Exception.class)
+    @Transactional(rollbackFor = Exception.class)
     public Map<String, Object> refund(Long id, RefundDTO dto) {
         Orders order = ordersMapper.selectById(id);
         if (order == null) {
@@ -511,7 +600,8 @@ public class OrderServiceImpl implements OrderService {
                 .status("成功")
                 .operatorName("系统")
                 .createTime(LocalDateTime.now()).build();
-        financeRefundFeignClient.add(refundRecordVO);
+        retryOnFeignException(2, 200, "添加退款记录 orderId=" + id,
+                () -> financeRefundFeignClient.add(refundRecordVO));
 
         order.setPaidAmount(order.getPaidAmount().subtract(dto.getAmount()));
         order.setStatus(OrderStatus.已退款.name());
@@ -566,6 +656,138 @@ public class OrderServiceImpl implements OrderService {
         ordersMapper.updateById(order);
 
         return Map.of("extraId", extra.getId());
+    }
+
+    @Override
+    @Transactional(rollbackFor = Exception.class)
+    public Map<String, Object> productOrder(Long id, ProductOrderDTO dto) {
+        Orders order = ordersMapper.selectById(id);
+        if (order == null) {
+            throw new BusinessException(404, "订单不存在");
+        }
+        Long customerId = UserContext.getUserId();
+        if (customerId == null || !customerId.equals(order.getCustomerId())) {
+            throw new BusinessException(403, "无权操作该订单");
+        }
+        if (!"已入住".equals(order.getStatus()) && !"已支付".equals(order.getStatus())) {
+            throw new BusinessException(400, "仅已入住 / 已支付订单可下单客房商品");
+        }
+
+        // 1. 读取积分抵扣比例（来自 system_setting）
+        BigDecimal ratio = DEFAULT_POINTS_RATIO;
+        boolean enabled = true;
+        try {
+            var settingRes = settingFeignClient.listSettings();
+            if (settingRes != null && settingRes.getData() != null) {
+                for (Map<String, Object> item : settingRes.getData()) {
+                    String k = String.valueOf(item.get("key"));
+                    String v = item.get("value") == null ? null : String.valueOf(item.get("value"));
+                    if ("points_discount_ratio".equals(k) && v != null && !v.isBlank()) {
+                        ratio = new BigDecimal(v);
+                    } else if ("points_discount_enabled".equals(k) && v != null) {
+                        enabled = "true".equalsIgnoreCase(v) || "1".equals(v);
+                    }
+                }
+            }
+        } catch (Exception ignored) { /* 使用默认比例 */ }
+
+        // 2. 计算商品小计
+        BigDecimal subtotal = BigDecimal.ZERO;
+        List<OrderExtra> extras = new ArrayList<>();
+        for (ProductOrderDTO.Item item : dto.getItems()) {
+            Product product = productMapper.selectById(item.getProductId());
+            if (product == null || !"上架".equals(product.getStatus())) {
+                throw new BusinessException(400, "商品[" + item.getProductId() + "]不可购买");
+            }
+            int qty = item.getQuantity() == null ? 1 : item.getQuantity();
+            OrderExtra extra = new OrderExtra();
+            extra.setOrderId(id);
+            extra.setItemName(product.getName());
+            extra.setAmount(product.getPrice());
+            extra.setQuantity(qty);
+            extra.setOperatorId(customerId);
+            extras.add(extra);
+            subtotal = subtotal.add(product.getPrice().multiply(BigDecimal.valueOf(qty)));
+        }
+
+        // 3. 积分抵扣
+        int pointsUsed = dto.getPointsUsed() == null ? 0 : dto.getPointsUsed();
+        BigDecimal discount = BigDecimal.ZERO;
+        int effectivePoints = 0;
+        if (enabled && pointsUsed > 0) {
+            // 客户积分余额校验
+            Result<CustomerVO> custRes = userFeignClient.detail(customerId);
+            int balance = (custRes != null && custRes.getData() != null && custRes.getData().getPoints() != null)
+                    ? custRes.getData().getPoints() : 0;
+            if (pointsUsed > balance) {
+                throw new BusinessException(400, "可用积分不足");
+            }
+            discount = ratio.multiply(BigDecimal.valueOf(pointsUsed));
+            // 抵扣金额不超过小计
+            if (discount.compareTo(subtotal) > 0) {
+                discount = subtotal;
+                effectivePoints = discount.divide(ratio, 0, java.math.RoundingMode.DOWN).intValue();
+            } else {
+                effectivePoints = pointsUsed;
+            }
+        }
+
+        // 4. 落库：消费项 + 订单金额累加
+        for (OrderExtra extra : extras) {
+            orderExtraMapper.insert(extra);
+        }
+        order.setExtraTotal(order.getExtraTotal().add(subtotal));
+        order.setTotalAmount(order.getTotalAmount().add(subtotal));
+        ordersMapper.updateById(order);
+
+        // 5. 扣减积分
+        if (effectivePoints > 0) {
+            userFeignClient.addPoints(customerId, -effectivePoints, "客房商品积分抵扣");
+        }
+
+        BigDecimal payable = subtotal.subtract(discount);
+        Map<String, Object> result = new LinkedHashMap<>();
+        result.put("subtotal", subtotal);
+        result.put("pointsUsed", effectivePoints);
+        result.put("discount", discount);
+        result.put("payable", payable);
+        return result;
+    }
+
+    @Override
+    public PageResult<ProductOrderVO> recentProductOrders(int page, int size) {
+        IPage<OrderExtra> p = new Page<>(page, size);
+        p = orderExtraMapper.selectPage(p,
+                Wrappers.<OrderExtra>lambdaQuery().orderByDesc(OrderExtra::getCreateTime));
+        List<OrderExtra> extras = p.getRecords();
+        List<ProductOrderVO> vos = new ArrayList<>();
+        if (!extras.isEmpty()) {
+            Set<Long> orderIds = extras.stream()
+                    .map(OrderExtra::getOrderId)
+                    .collect(Collectors.toSet());
+            List<Orders> ordersList = ordersMapper.selectBatchIds(orderIds);
+            Map<Long, Orders> orderMap = ordersList.stream()
+                    .collect(Collectors.toMap(Orders::getId, o -> o, (a, b) -> a));
+            for (OrderExtra e : extras) {
+                ProductOrderVO vo = ProductOrderVO.builder()
+                        .id(e.getId())
+                        .orderId(e.getOrderId())
+                        .itemName(e.getItemName())
+                        .amount(e.getAmount())
+                        .quantity(e.getQuantity())
+                        .operatorId(e.getOperatorId())
+                        .createTime(e.getCreateTime())
+                        .build();
+                Orders o = orderMap.get(e.getOrderId());
+                if (o != null) {
+                    vo.setOrderNo(o.getOrderNo());
+                    vo.setRoomNumber(o.getRoomNumber());
+                    vo.setCustomerName(o.getCustomerName());
+                }
+                vos.add(vo);
+            }
+        }
+        return PageResult.of(p.getTotal(), page, size, vos);
     }
 
     @Override
@@ -632,9 +854,19 @@ public class OrderServiceImpl implements OrderService {
 
     @Override
     public OrderVO myGetById(Long id) {
-        OrderVO orderVO = OrderVO.builder().build();
+        log.info("【查询订单详情】id={}", id);
         // 获取到订单信息
         Orders order = ordersMapper.selectById(id);
+        if (order == null) {
+            // 尝试按 orderNo 查询（兼容前端可能传了 orderNo 的情况）
+            order = ordersMapper.selectOne(new QueryWrapper<Orders>().eq("order_no", String.valueOf(id)));
+            if (order == null) {
+                log.warn("【订单不存在】id={}, 已尝试按 orderNo 查询均无结果", id);
+                return OrderVO.builder().build();
+            }
+            log.info("【按 orderNo 找到订单】orderNo={}, 实际id={}", id, order.getId());
+        }
+        OrderVO orderVO = OrderVO.builder().build();
         // 复制属性
         BeanUtil.copyProperties(order, orderVO);
 
@@ -718,8 +950,9 @@ public class OrderServiceImpl implements OrderService {
             try {
                 order.setStatus("已取消");
                 ordersMapper.updateById(order);
-                roomFeignClient.changeStatus(order.getRoomId(),
-                        new RoomStatusChangeDTO(RoomStatus.空闲中.name(), "超时自动取消"));
+                retryOnFeignException(1, 200, "自动取消-修改房间状态 roomId=" + order.getRoomId(),
+                        () -> roomFeignClient.changeStatus(order.getRoomId(),
+                                new RoomStatusChangeDTO(RoomStatus.空闲中.name(), "超时自动取消")));
                 count++;
                 log.info("自动取消超时订单: orderNo={}, roomId={}", order.getOrderNo(), order.getRoomId());
                 OrderCancelledEvent event = OrderCancelledEvent.builder()
@@ -739,9 +972,12 @@ public class OrderServiceImpl implements OrderService {
 
     private void publishEvent(OrderEvent event, String routingKey) {
         try {
-            rabbitTemplate.convertAndSend("hotel.order.events", routingKey, event);
+            retryOnFeignException(2, 200,
+                    "发布订单事件 orderNo=" + event.getOrderNo() + " routingKey=" + routingKey,
+                    () -> rabbitTemplate.convertAndSend("hotel.order.events", routingKey, event));
         } catch (Exception e) {
-            log.error("发布订单事件失败: orderNo={}, routingKey={}", event.getOrderNo(), routingKey, e);
+            log.error("[严重] 订单事件发送失败（重试耗尽），数据可能丢失！orderNo={}, routingKey={}, eventType={}",
+                    event.getOrderNo(), routingKey, event.getEventType(), e);
         }
     }
 
@@ -750,6 +986,31 @@ public class OrderServiceImpl implements OrderService {
             RLock lock = redissonClient.getLock("lock:room:" + roomId);
             if (lock.isHeldByCurrentThread()) {
                 lock.unlock();
+            }
+        }
+    }
+
+    /**
+     * 简单重试工具：对 Feign 调用等可能因网络抖动失败的操作进行重试
+     */
+    private void retryOnFeignException(int maxRetries, long baseSleepMs,
+                                       String description, Runnable action) {
+        for (int i = 0; i <= maxRetries; i++) {
+            try {
+                action.run();
+                return;
+            } catch (Exception e) {
+                log.warn("{} 失败 (第{}次): {}", description, i + 1, e.getMessage());
+                if (i >= maxRetries) {
+                    throw e;
+                }
+                try {
+                    long sleep = baseSleepMs * (1L << i);
+                    Thread.sleep(sleep);
+                } catch (InterruptedException ie) {
+                    Thread.currentThread().interrupt();
+                    throw new BusinessException(500, description + " 被中断");
+                }
             }
         }
     }
@@ -763,5 +1024,21 @@ public class OrderServiceImpl implements OrderService {
                         (String) row.get("roomTypeName"),
                         ((Number) row.get("orderCount")).longValue()))
                 .toList();
+    }
+
+    @Override
+    public List<OrderVO> getRoomSchedule(Long roomId, String startDate, String endDate) {
+        // 默认查询未来 30 天
+        LocalDate start = startDate != null ? LocalDate.parse(startDate) : LocalDate.now();
+        LocalDate end = endDate != null ? LocalDate.parse(endDate) : start.plusDays(30);
+        // 查询该房间在日期范围内非取消的订单（含待支付/已支付/已入住）
+        List<Orders> orderList = ordersMapper.selectList(new QueryWrapper<Orders>()
+                .eq("room_id", roomId)
+                .ne("status", "已取消")
+                .ge("check_in_date", start.toString())
+                .le("check_in_date", end.toString())
+                .orderByAsc("check_in_date")
+        );
+        return BeanUtil.copyToList(orderList, OrderVO.class);
     }
 }

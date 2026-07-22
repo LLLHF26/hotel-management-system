@@ -9,7 +9,7 @@ import org.springframework.web.bind.annotation.*;
 @FeignClient(value = "user-service", contextId = "orderUserFeignClient", fallback = UserServiceFeignClientFallback.class)
 public interface UserFeignClient {
     /** 会员详情 */
-    @GetMapping("/api/user/{id}")
+    @GetMapping("/api/customer/{id}")
     public Result<CustomerVO> detail(@PathVariable Long id);
 
     /** 增加积分 */

@@ -86,6 +86,27 @@ export async function rebuildVectorDB() {
   return await res.json()
 }
 
+export async function previewDocument(docId: number) {
+  const res = await authFetch(`/api/ai/knowledge/${docId}/preview`)
+  if (!res.ok) {
+    const json = await res.json().catch(() => ({}))
+    throw new Error(json.msg || '预览失败')
+  }
+  const blob = await res.blob()
+  const blobUrl = URL.createObjectURL(blob)
+  window.open(blobUrl, '_blank')
+  setTimeout(() => URL.revokeObjectURL(blobUrl), 5 * 60 * 1000)
+}
+
+export async function getDocumentContent(docId: number): Promise<string> {
+  const res = await authFetch(`/api/ai/knowledge/${docId}/content`)
+  const json = await res.json()
+  if (!res.ok || json.code !== 200) {
+    throw new Error(json.msg || '读取文档内容失败')
+  }
+  return json.data || ''
+}
+
 export async function getCategories() {
   const res = await authFetch('/api/ai/knowledge/categories')
   return await res.json()

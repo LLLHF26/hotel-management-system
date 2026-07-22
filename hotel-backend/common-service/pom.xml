@@ -103,6 +103,12 @@
             <groupId>org.apache.kafka</groupId>
             <artifactId>kafka-clients</artifactId>
         </dependency>
+
+        <!-- Knife4j（OpenAPI 注解） -->
+        <dependency>
+            <groupId>com.github.xiaoymin</groupId>
+            <artifactId>knife4j-openapi3-jakarta-spring-boot-starter</artifactId>
+        </dependency>
     </dependencies>
 
     <!-- common-service 是 JAR 库，不需要可执行包，不引入 spring-boot-maven-plugin -->

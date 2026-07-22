@@ -6,35 +6,41 @@ spring:
     web-application-type: reactive
   application:
     name: gateway-service
+  config:
+    import: nacos:gateway-service.yml
   cloud:
     nacos:
       discovery:
         server-addr: localhost:8848
       config:
-        enabled: false
-        import-check:
-          enabled: false
+        server-addr: localhost:8848
+        file-extension: yml
+        group: DEFAULT_GROUP
     sentinel:
       transport:
         dashboard: localhost:8080
     gateway:
       routes:
         - id: user-service
-          uri: http://localhost:8081
+          uri: lb://user-service
           predicates:
             - Path=/api/auth/**,/api/user/**,/api/customer/**
         - id: room-service
-          uri: http://localhost:8082
+          uri: lb://room-service
           predicates:
             - Path=/api/room/**
         - id: order-service
-          uri: http://localhost:8083
+          uri: lb://order-service
           predicates:
             - Path=/api/order/**
         - id: finance-service
-          uri: http://localhost:8084
+          uri: lb://finance-service
           predicates:
             - Path=/api/finance/**
+        - id: system-service
+          uri: lb://system-service
+          predicates:
+            - Path=/api/system/**
         - id: ai-service
           uri: http://localhost:8000
           predicates:

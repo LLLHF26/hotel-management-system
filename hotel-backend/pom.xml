@@ -19,6 +19,7 @@
         <module>room-service</module>
         <module>order-service</module>
         <module>finance-service</module>
+        <module>system-service</module>
     </modules>
 
     <!-- ==================== 版本集中管理 ==================== -->

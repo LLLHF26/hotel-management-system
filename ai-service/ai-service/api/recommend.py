@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import json
 import logging
 import re
@@ -11,7 +12,7 @@ from fastapi import APIRouter, Depends
 from agents.recommend_agent import create_recommend_agent
 from api.deps import get_current_user
 from core.context import get_request_context
-from core.http_client import GatewayClient
+from core.http_client import call_gateway_async
 from schemas.common import Result
 from schemas.recommend import RecommendItem, RecommendRequest, RecommendResponse
 
@@ -27,17 +28,17 @@ async def recommend_room(
 ):
     ctx = get_request_context()
 
-    # 1. 调用 gateway → room-service 获取可用房型和房间
+    # 1. 调用 gateway → room-service 获取可用房型和房间（异步 + 连接池 + 重试 + 熔断）
     available_types: list[dict] = []
     available_rooms: list[dict] = []
     try:
-        client = GatewayClient()
-        types_resp = client.get("/api/room/type/list", token=ctx.token)
-        available_types = _extract_records(types_resp)
-
-        rooms_resp = client.get(
-            "/api/room/list", token=ctx.token, params={"status": "空闲中"}
+        types_resp, rooms_resp = await asyncio.gather(
+            call_gateway_async("/api/room/type/list", token=ctx.token),
+            call_gateway_async(
+                "/api/room/list", token=ctx.token, params={"status": "空闲中"}
+            ),
         )
+        available_types = _extract_records(types_resp)
         available_rooms = _extract_records(rooms_resp)
     except Exception:
         logger.exception("调用 room-service 获取房型/房间失败")

@@ -2,7 +2,10 @@
   <div>
     <!-- 页面标题 -->
     <div class="page-header">
-      <h2>房态看板</h2>
+      <div>
+        <h2>房态管理</h2>
+        <div class="page-subtitle">实时查看所有房间状态</div>
+      </div>
     </div>
 
     <!-- 筛选栏 -->
@@ -34,7 +37,8 @@
     </div>
 
     <!-- 楼层分组 -->
-    <div v-for="group in floorGroups" :key="group.floor" class="floor-section">
+    <div class="content-card">
+      <div v-for="group in floorGroups" :key="group.floor" class="floor-section">
       <div class="floor-header">
         <span class="floor-title">{{ group.floor }}F</span>
         <span class="floor-count">{{ group.rooms.length }} 间</span>
@@ -62,7 +66,7 @@
               size="small"
               type="primary"
               round
-              @click="goOrders"
+              @click="openCreate(room)"
             >
               办理入住
             </el-button>
@@ -79,12 +83,13 @@
         </div>
       </div>
     </div>
+    </div>
 
     <!-- 空状态 -->
     <el-empty v-if="!floorGroups.length && !loading" description="暂无房间数据" />
 
     <!-- 房间详情抽屉 -->
-    <el-drawer v-model="drawerVisible" :title="`房间 ${selectedRoom?.roomNumber} 详情`" size="400px">
+    <el-drawer v-model="drawerVisible" :title="`房间 ${selectedRoom?.roomNumber} 详情`" size="460px">
       <template v-if="selectedRoom">
         <el-descriptions :column="1" border>
           <el-descriptions-item label="房型">{{ selectedRoom.roomTypeName }}</el-descriptions-item>
@@ -95,11 +100,72 @@
           <el-descriptions-item label="价格">&yen;{{ formatMoney(selectedRoom.price) }}</el-descriptions-item>
           <el-descriptions-item v-if="selectedRoom.cleanerName" label="保洁员">{{ selectedRoom.cleanerName }}</el-descriptions-item>
         </el-descriptions>
-        <div style="margin-top: 20px; display: flex; gap: 10px;">
-          <el-button v-if="selectedRoom.status === '待清洁中'" type="warning" @click="openAssign(selectedRoom)">
-            指派打扫
-          </el-button>
-          <el-button v-if="selectedRoom.status === '空闲中'" type="primary" @click="goOrders">办理入住</el-button>
+
+        <!-- 预订时间线 -->
+        <div class="timeline-section">
+          <div class="section-header" style="margin-top:20px;margin-bottom:12px;">
+            <el-icon :size="16"><Calendar /></el-icon>
+            <h3>预订时间线</h3>
+            <span class="timeline-hint">未来 {{ scheduleDays }} 天</span>
+            <el-button link size="small" style="margin-left:auto" @click="loadSchedule">
+              刷新
+            </el-button>
+          </div>
+
+          <!-- 月份导航 + 图例 -->
+          <div class="timeline-toolbar">
+            <div class="timeline-months">
+              <span v-for="m in scheduleMonths" :key="m.label"
+                    :class="['month-chip', { active: m.active }]">{{ m.label }}</span>
+            </div>
+            <div class="timeline-legend">
+              <span class="legend-dot legend--free"></span><span>空闲</span>
+              <span class="legend-dot legend--booked"></span><span>已订</span>
+              <span class="legend-dot legend--today"></span><span>今天</span>
+            </div>
+          </div>
+
+          <!-- 星期头 -->
+          <div class="cal-week">
+            <span v-for="w in weekDays" :key="w" class="cal-head">{{ w }}</span>
+          </div>
+
+          <!-- 日历格子 -->
+          <div v-loading="scheduleLoading" class="cal-grid">
+            <div
+              v-for="(cell, i) in scheduleCells"
+              :key="i"
+              :class="['cal-cell',
+                       { 'is-today': cell.isToday,
+                         'is-other': cell.isOtherMonth,
+                         'is-booked': cell.isBooked,
+                         'is-checkin': cell.isCheckin }]"
+              :title="cell.tooltip"
+            >
+              <span class="cal-date">{{ cell.day }}</span>
+              <span v-if="cell.isBooked" class="cal-badge"></span>
+            </div>
+          </div>
+
+          <!-- 订单明细 -->
+          <div v-if="scheduleOrders.length" class="schedule-orders">
+            <div class="so-title">近期订单（{{ scheduleOrders.length }} 条）</div>
+            <div v-for="o in scheduleOrders" :key="o.orderNo || o.id" class="so-row">
+              <span class="so-status" :class="{ 'so--active': o.status === '已入住' }">
+                {{ o.statusName || o.status }}
+              </span>
+              <span class="so-range">{{ formatDate(o.checkInDate) }} → {{ formatDate(o.checkOutDate) }}</span>
+              <span class="so-guest">{{ o.customerName || '-' }}</span>
+            </div>
+          </div>
+          <div v-else-if="!scheduleLoading" class="so-empty">暂无订单记录</div>
+
+          <div style="margin-top: 16px; display: flex; gap: 10px;">
+            <el-button v-if="selectedRoom.status === '待清洁中'" type="warning" @click="openAssign(selectedRoom)">
+              指派打扫
+            </el-button>
+            <el-button v-if="selectedRoom.status === '空闲中'" type="primary" @click="openCreate(selectedRoom)">办理入住</el-button>
+          </div>
         </div>
       </template>
     </el-drawer>
@@ -119,20 +185,23 @@
         <el-button type="primary" :loading="assignLoading" @click="submitAssign">确认指派</el-button>
       </template>
     </el-dialog>
+
+    <!-- 新建预订 / 散客入住 -->
+    <OrderCreateDialog ref="createRef" @success="loadDashboard" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue'
-import { useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
-import { Search, InfoFilled } from '@element-plus/icons-vue'
+import { Search, InfoFilled, Calendar } from '@element-plus/icons-vue'
 import type { RoomVO } from '@/types'
-import { getRoomDashboard, getCleanerList, assignCleaning } from '@/api/room'
-import { formatMoney } from '@/utils/format'
+import { getRoomDashboard, getCleanerList, assignCleaning, getRoomSchedule } from '@/api/room'
+import type { OrderVO } from '@/types'
+import { formatMoney, formatDate } from '@/utils/format'
 import { ROOM_STATUS_OPTIONS } from '@/utils/constants'
+import OrderCreateDialog from '@/components/order/OrderCreateDialog.vue'
 
-const router = useRouter()
 const loading = ref(false)
 const allRooms = ref<RoomVO[]>([])
 const summary = ref<Record<string, number>>({})
@@ -147,6 +216,45 @@ const assignLoading = ref(false)
 const assignRoomId = ref<number>()
 const selectedCleanerId = ref<number>()
 const cleaners = ref<{ id: number; realName: string; currentTaskCount?: number }[]>([])
+
+/* ========== 预订时间线 ========== */
+const scheduleDays = 30
+const scheduleLoading = ref(false)
+const scheduleOrders = ref<OrderVO[]>([])
+const weekDays = ['一', '二', '三', '四', '五', '六', '日']
+
+interface CalCell {
+  day: number | null
+  dateStr: string
+  isToday: boolean
+  isOtherMonth: boolean
+  isBooked: boolean
+  isCheckin: boolean
+  tooltip: string
+}
+
+const scheduleCells = ref<CalCell[]>([])
+
+const scheduleMonths = computed(() => {
+  if (!scheduleCells.value.length) return []
+  const months: { label: string; active: boolean }[] = []
+  const seen = new Set<string>()
+  for (const c of scheduleCells.value) {
+    if (!c.dateStr || c.day == null) continue
+    const m = c.dateStr.slice(0, 7) // YYYY-MM
+    const mo = Number(m.split('-')[1])
+    if (!seen.has(m)) {
+      seen.add(m)
+      months.push({ label: `${mo}月`, active: false })
+    }
+    // 标记含今天的月份为 active
+    if (c.isToday) {
+      const idx = months.findIndex(x => x.label === `${mo}月`)
+      if (idx >= 0) months[idx].active = true
+    }
+  }
+  return months
+})
 
 const floors = computed(() => {
   const set = new Set(allRooms.value.map((r) => r.floor).filter((f) => f != null) as number[])
@@ -213,10 +321,74 @@ function statusTagType(status: string) {
 function openDrawer(room: RoomVO) {
   selectedRoom.value = room
   drawerVisible.value = true
+  loadSchedule()
 }
 
-function goOrders() {
-  router.push('/front-desk/orders')
+async function loadSchedule() {
+  if (!selectedRoom.value) return
+  scheduleLoading.value = true
+  try {
+    const list = await getRoomSchedule(selectedRoom.value.id)
+    scheduleOrders.value = list
+    buildCalendarCells(list)
+  } finally {
+    scheduleLoading.value = false
+  }
+}
+
+function buildCalendarCells(orders: OrderVO[]) {
+  const today = new Date()
+  const start = new Date(today.getFullYear(), today.getMonth(), today.getDate())
+  const cells: CalCell[] = []
+  // 填充到周一（与 weekDays 对齐，weekDays[0]=周一）
+  let offset = start.getDay() // 0=Sun 1=Mon..6=Sat, 转为 0=Mon..6=Sun
+  if (offset === 0) {
+    offset = 6
+  } else {
+    offset -= 1
+  }
+  for (let i = 0; i < offset; i++) {
+    cells.push({ day: null, dateStr: '', isToday: false, isOtherMonth: true, isBooked: false, isCheckin: false, tooltip: '' })
+  }
+
+  // 构建已预订日期的快速查找 Set
+  // 每个订单覆盖 [checkInDate, checkOutDate) 区间内的每一天
+  const bookedMap = new Map<string, { status: string; orderNo: string; guest: string }>()
+  for (const o of orders) {
+    if (!o.checkInDate || !o.checkOutDate) continue
+    const ci = new Date(o.checkInDate)
+    const co = new Date(o.checkOutDate)
+    for (let d = new Date(ci); d < co; d.setDate(d.getDate() + 1)) {
+      const key = d.toISOString().slice(0, 10)
+      bookedMap.set(key, { status: o.status || '', orderNo: o.orderNo || '', guest: o.customerName || '' })
+    }
+  }
+
+  // 填充 scheduleDays 天
+  for (let i = 0; i < scheduleDays; i++) {
+    const d = new Date(start.getTime() + i * 86400000)
+    const ds = d.toISOString().slice(0, 10)
+    const info = bookedMap.get(ds)
+    const isToday = ds === today.toISOString().slice(0, 10)
+    cells.push({
+      day: d.getDate(),
+      dateStr: ds,
+      isToday,
+      isOtherMonth: false,
+      isBooked: !!info,
+      isCheckin: info?.status === '已入住',
+      tooltip: info
+        ? `${ds} — ${info.status}${info.guest ? ' (' + info.guest + ')' : ''}`
+        : `${ds} — 空闲`,
+    })
+  }
+  scheduleCells.value = cells
+}
+
+const createRef = ref<InstanceType<typeof OrderCreateDialog>>()
+
+function openCreate(room: RoomVO) {
+  createRef.value?.open({ roomTypeId: room.roomTypeId })
 }
 
 async function openAssign(room: RoomVO) {
@@ -260,6 +432,10 @@ async function submitAssign() {
 
 .floor-section {
   margin-bottom: 24px;
+}
+
+.floor-section:last-child {
+  margin-bottom: 0;
 }
 
 .floor-header {
@@ -338,5 +514,221 @@ async function submitAssign() {
   margin-top: 12px;
   padding-top: 10px;
   border-top: 1px solid #f1f5f9;
+}
+
+/* ===== 预订时间线 ===== */
+.timeline-section {
+  margin-top: 4px;
+}
+
+.section-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.section-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: #1e293b;
+}
+
+.timeline-hint {
+  font-size: 12px;
+  color: #94a3b8;
+}
+
+.timeline-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 10px;
+}
+
+.timeline-months {
+  display: flex;
+  gap: 6px;
+  flex-wrap: wrap;
+}
+
+.month-chip {
+  font-size: 12px;
+  padding: 2px 10px;
+  border-radius: 12px;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.month-chip.active {
+  background: #e0edff;
+  color: #2563eb;
+  font-weight: 600;
+}
+
+.timeline-legend {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 12px;
+  color: #64748b;
+}
+
+.legend-dot {
+  width: 10px;
+  height: 10px;
+  border-radius: 3px;
+  display: inline-block;
+  margin-left: 8px;
+}
+
+.legend-dot:first-child {
+  margin-left: 0;
+}
+
+.legend--free {
+  background: #f1f5f9;
+  border: 1px solid #e2e8f0;
+}
+
+.legend--booked {
+  background: #dbeafe;
+  border: 1px solid #93c5fd;
+}
+
+.legend--today {
+  background: #fde68a;
+  border: 1px solid #f59e0b;
+}
+
+.cal-week {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  margin-bottom: 4px;
+}
+
+.cal-head {
+  text-align: center;
+  font-size: 12px;
+  color: #94a3b8;
+  padding: 2px 0;
+}
+
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 4px;
+  min-height: 40px;
+}
+
+.cal-cell {
+  position: relative;
+  height: 38px;
+  border-radius: 6px;
+  background: #f8fafc;
+  border: 1px solid #eef2f7;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 12px;
+  color: #334155;
+}
+
+.cal-cell.is-other {
+  background: transparent;
+  border-color: transparent;
+  color: #cbd5e1;
+}
+
+.cal-cell.is-booked {
+  background: #dbeafe;
+  border-color: #93c5fd;
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.cal-cell.is-checkin {
+  background: #fef3c7;
+  border-color: #fcd34d;
+  color: #b45309;
+}
+
+.cal-cell.is-today {
+  box-shadow: inset 0 0 0 2px #f59e0b;
+}
+
+.cal-date {
+  line-height: 1;
+}
+
+.cal-badge {
+  position: absolute;
+  right: 4px;
+  bottom: 4px;
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: #2563eb;
+}
+
+.cal-cell.is-checkin .cal-badge {
+  background: #d97706;
+}
+
+.schedule-orders {
+  margin-top: 14px;
+  border-top: 1px dashed #e2e8f0;
+  padding-top: 10px;
+}
+
+.so-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: #1e293b;
+  margin-bottom: 8px;
+}
+
+.so-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid #f1f5f9;
+}
+
+.so-status {
+  flex: 0 0 auto;
+  font-size: 11px;
+  padding: 1px 8px;
+  border-radius: 10px;
+  background: #f1f5f9;
+  color: #64748b;
+}
+
+.so-status.so--active {
+  background: #fef3c7;
+  color: #b45309;
+}
+
+.so-range {
+  flex: 1 1 auto;
+  color: #334155;
+}
+
+.so-guest {
+  flex: 0 0 auto;
+  color: #94a3b8;
+}
+
+.so-empty {
+  margin-top: 14px;
+  font-size: 12px;
+  color: #94a3b8;
+  text-align: center;
+  padding: 16px 0;
 }
 </style>

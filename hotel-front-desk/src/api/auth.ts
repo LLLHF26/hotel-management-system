@@ -1,5 +1,5 @@
 import { request } from './request'
-import type { LoginVO } from '@/types'
+import type { LoginVO, RefreshVO } from '@/types'
 
 export function login(username: string, password: string) {
   return request<LoginVO>({
@@ -10,7 +10,7 @@ export function login(username: string, password: string) {
 }
 
 export function refreshToken() {
-  return request<LoginVO>({
+  return request<RefreshVO>({
     url: '/api/auth/refresh',
     method: 'POST',
   })

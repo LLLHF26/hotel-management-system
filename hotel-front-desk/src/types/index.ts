@@ -19,6 +19,11 @@ export interface LoginVO {
   role: string
 }
 
+export interface RefreshVO {
+  token: string
+  expireAt?: string
+}
+
 export interface UserVO {
   id: number
   username: string
@@ -30,20 +35,6 @@ export interface UserVO {
   status?: number
   createTime?: string
   updateTime?: string
-}
-
-export interface CustomerVO {
-  id: number
-  realName: string
-  idCard?: string
-  phone: string
-  gender?: number
-  avatar?: string
-  points?: number
-  totalConsumed?: number
-  memberLevel?: string
-  status?: number
-  createTime?: string
 }
 
 export interface CleanerVO {
@@ -66,11 +57,52 @@ export interface RoomVO {
   taskStartTime?: string
   currentTask?: {
     taskId?: number
+    type?: string
     cleanerName?: string
     startTime?: string
-    status?: string
     reason?: string
+    remainMinutes?: number
   }
+}
+
+export interface RoomTypeVO {
+  id: number
+  name: string
+  description?: string
+  area?: number
+  bedType?: string
+  maxGuests?: number
+  price?: number
+  coverImage?: string
+}
+
+export interface OrderCreateDTO {
+  roomTypeId: number
+  customerId?: number
+  checkInDate: string
+  checkOutDate: string
+  roomCount?: number
+  guestName?: string
+  guestPhone?: string
+  remark?: string
+}
+
+export interface OrderCreateResult {
+  orderId: number
+  orderNo: string
+  [key: string]: unknown
+}
+
+export interface CustomerVO {
+  id: number
+  realName: string
+  phone: string
+  idCard?: string
+  gender?: number
+  memberLevel?: string
+  points?: number
+  totalConsumed?: number
+  status?: number
 }
 
 export interface DashboardVO {
@@ -84,7 +116,9 @@ export interface ExtraVO {
   itemName: string
   amount: number
   quantity: number
-  totalAmount?: number
+  subtotal?: number
+  operatorId?: number
+  operatorName?: string
   createTime?: string
 }
 
@@ -95,7 +129,7 @@ export interface PaymentVO {
   method: string
   methodName?: string
   status?: string
-  createTime?: string
+  paidAt?: string
 }
 
 export interface OrderVO {
@@ -141,6 +175,7 @@ export interface TodaySummary {
 
 export interface RevenueSummaryVO {
   today: TodaySummary
+  yesterday?: TodaySummary
   thisMonth?: unknown
   thisYear?: unknown
 }
@@ -159,12 +194,12 @@ export interface OccupancyByTypeVO {
 }
 
 export interface AlertItem {
-  id?: string | number
-  title?: string
-  message?: string
-  level?: string
-  time?: string
-  read?: boolean
+  id: number
+  type: string
+  level: string
+  content: string
+  trigger_time: string
+  is_read: boolean
 }
 
 export interface AlertStatusVO {
@@ -181,13 +216,6 @@ export interface OrderListParams {
   checkInDate?: string
   startDate?: string
   endDate?: string
-}
-
-export interface CustomerListParams {
-  page?: number
-  size?: number
-  keyword?: string
-  memberLevel?: string
 }
 
 export interface RoomListParams {

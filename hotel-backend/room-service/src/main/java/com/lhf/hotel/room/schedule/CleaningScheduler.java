@@ -3,6 +3,7 @@ package com.lhf.hotel.room.schedule;
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lhf.hotel.common.dto.CleanerDTO;
 import com.lhf.hotel.common.enums.RoomStatus;
+import com.lhf.hotel.common.util.SchedulerLock;
 import com.lhf.hotel.room.mapper.CleaningTaskMapper;
 import com.lhf.hotel.room.mapper.RoomMapper;
 import com.lhf.hotel.room.model.entity.CleaningTask;
@@ -29,18 +30,29 @@ public class CleaningScheduler {
     private final RoomMapper roomMapper;
     private final CleaningTaskMapper taskMapper;
     private final CleaningServiceImpl cleaningService;
+    private final SchedulerLock schedulerLock;
 
     public CleaningScheduler(RoomMapper roomMapper, CleaningTaskMapper taskMapper,
-                             CleaningServiceImpl cleaningService) {
+                             CleaningServiceImpl cleaningService, SchedulerLock schedulerLock) {
         this.roomMapper = roomMapper;
         this.taskMapper = taskMapper;
         this.cleaningService = cleaningService;
+        this.schedulerLock = schedulerLock;
     }
 
     @Scheduled(fixedDelay = 10_000)
     public void processCleaning() {
-        assignPendingRooms();
-        completeExpiredCleaning();
+        String lockKey = "scheduler:cleaning";
+        String owner = schedulerLock.tryLockWithOwner(lockKey, 60);
+        if (owner == null) {
+            return;
+        }
+        try {
+            assignPendingRooms();
+            completeExpiredCleaning();
+        } finally {
+            schedulerLock.unlock(lockKey, owner);
+        }
     }
 
     /** 待清洁中超过 1 分钟 → 自动分配保洁 → 打扫中 */

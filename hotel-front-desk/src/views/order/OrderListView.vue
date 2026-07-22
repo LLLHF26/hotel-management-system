@@ -2,7 +2,13 @@
   <div>
     <!-- 页面标题 -->
     <div class="page-header">
-      <h2>订单管理</h2>
+      <div>
+        <h2>订单中心</h2>
+        <div class="page-subtitle">预订与订单查询管理</div>
+      </div>
+      <el-button type="primary" @click="createRef?.open()">
+        <el-icon><Plus /></el-icon> 新建预订 / 散客入住
+      </el-button>
     </div>
 
     <!-- 筛选栏 -->
@@ -25,10 +31,6 @@
         <el-icon><Search /></el-icon> 搜索
       </el-button>
       <el-button @click="reset">重置</el-button>
-      <div class="filter-divider"></div>
-      <el-button type="success" plain round @click="$router.push('/front-desk/customers')">
-        + 散客入住
-      </el-button>
       <el-button plain round @click="filterTodayCheckIn">今日入住</el-button>
       <el-button plain round @click="filterTodayCheckOut">今日退房</el-button>
     </div>
@@ -73,7 +75,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="280" fixed="right">
+        <el-table-column label="操作" width="320" fixed="right">
           <template #default="{ row }">
             <div class="action-group">
               <el-button link type="primary" @click="goDetail(row.id)">详情</el-button>
@@ -83,12 +85,12 @@
               </template>
               <template v-if="row.status === '已支付'">
                 <el-button link type="primary" @click="actionRef?.openCheckIn(row)">入住</el-button>
+                <el-button link @click="actionRef?.openChangeRoom(row)">换房</el-button>
               </template>
               <template v-if="row.status === '已入住'">
                 <el-button link type="warning" @click="actionRef?.openCheckOut(row)">退房</el-button>
                 <el-button link @click="actionRef?.openExtend(row)">续住</el-button>
                 <el-button link @click="actionRef?.openChangeRoom(row)">换房</el-button>
-                <el-button link @click="actionRef?.openExtra(row)">消费</el-button>
               </template>
             </div>
           </template>
@@ -108,21 +110,24 @@
     </div>
 
     <OrderActions ref="actionRef" @success="loadList" />
+    <OrderCreateDialog ref="createRef" @success="loadList" />
   </div>
 </template>
 
 <script setup lang="ts">
 import { onMounted, reactive, ref } from 'vue'
 import { useRouter } from 'vue-router'
-import { Search } from '@element-plus/icons-vue'
+import { Search, Plus } from '@element-plus/icons-vue'
 import type { OrderVO } from '@/types'
 import { getOrderList } from '@/api/order'
 import OrderActions from '@/components/order/OrderActions.vue'
+import OrderCreateDialog from '@/components/order/OrderCreateDialog.vue'
 import { formatMoney, dateRangeLabel, todayStr } from '@/utils/format'
 import { ORDER_STATUS_OPTIONS } from '@/utils/constants'
 
 const router = useRouter()
 const actionRef = ref<InstanceType<typeof OrderActions>>()
+const createRef = ref<InstanceType<typeof OrderCreateDialog>>()
 const loading = ref(false)
 const list = ref<OrderVO[]>([])
 const total = ref(0)

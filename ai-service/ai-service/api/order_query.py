@@ -11,7 +11,7 @@ from fastapi import APIRouter, Depends
 from agents.order_agent import create_order_agent
 from api.deps import get_current_user
 from core.context import get_request_context
-from core.http_client import GatewayClient
+from core.http_client import call_gateway_async
 from schemas.common import Result
 from schemas.order_query import OrderQueryRequest, OrderQueryResponse, OrderVO
 
@@ -57,8 +57,9 @@ async def query_orders(
 
     orders: list[OrderVO] = []
     try:
-        client = GatewayClient()
-        resp = client.get("/api/order/list", token=ctx.token, params=gateway_params)
+        resp = await call_gateway_async(
+            "/api/order/list", token=ctx.token, params=gateway_params
+        )
         data = resp.get("data", {})
         order_list = data.get("records", data) if isinstance(data, dict) else data
         if isinstance(order_list, list):

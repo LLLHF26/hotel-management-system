@@ -39,7 +39,7 @@ def db_session():
 
 @pytest.fixture
 def client():
-    """带鉴权绕过的 TestClient（mock LLM + Embedding + Chroma + JWT 解码）。"""
+    """带鉴权绕过的 TestClient（mock LLM + Embedding + 向量库 + JWT 解码）。"""
     mock_store = MagicMock()
     mock_store.similarity_search_with_score.return_value = []
     mock_store._collection.count.return_value = 0

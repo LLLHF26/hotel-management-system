@@ -34,13 +34,15 @@ def query_room_types(query_json: str = "") -> str:
 @tool
 def query_available_rooms(filter_json: str = "") -> str:
     """查询当前空闲中的房间列表及房间号。
-    在用户询问"有空房吗""还有哪些房间可以订"时调用此工具。
+    在用户询问"有空房吗""还有哪些房间可以订""行政套房有没有空房"等涉及具体房型可用性问题时调用此工具。
+    返回结果包含所有空闲房间的完整列表（不分页截断）。
 
     Args:
         filter_json: 可选 JSON，如 {"room_type_id": 3} 或 {}
     """
     ctx = get_request_context()
-    params = {"status": "空闲中"}
+    # size=200 避免后端默认分页(size=10)导致高楼层房间被截断
+    params = {"status": "空闲中", "size": 200}
     if filter_json:
         try:
             extra = json.loads(filter_json)

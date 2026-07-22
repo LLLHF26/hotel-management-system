@@ -39,14 +39,18 @@ function request(url, options = {}, useAi = false) {
           }
         } else if (statusCode === 401) {
           uni.removeStorageSync('token')
-          uni.removeStorageSync('customerId')
           uni.reLaunch({ url: '/pages/login/login' })
           reject(data)
         } else if (statusCode === 403) {
           uni.showToast({ title: '权限不足', icon: 'none' })
           reject(data)
         } else {
-          uni.showToast({ title: '服务器错误(' + statusCode + ')', icon: 'none' })
+          // 业务异常：优先展示后端返回的 msg（如“用户名或密码错误”）
+          if (data && data.msg) {
+            uni.showToast({ title: data.msg, icon: 'none' })
+          } else {
+            uni.showToast({ title: '服务器错误(' + statusCode + ')', icon: 'none' })
+          }
           reject(data)
         }
       },

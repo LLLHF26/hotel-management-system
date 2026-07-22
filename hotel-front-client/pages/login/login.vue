@@ -10,7 +10,7 @@
 
       <view class="login-form">
         <view class="input-group">
-          <view class="input-icon">📱</view>
+          <image class="input-icon" src="/static/icons/phone.png" mode="aspectFit"></image>
           <input
             class="input-field"
             v-model="username"
@@ -20,7 +20,7 @@
           />
         </view>
         <view class="input-group">
-          <view class="input-icon">🔒</view>
+          <image class="input-icon" src="/static/icons/lock.png" mode="aspectFit"></image>
           <input
             class="input-field"
             v-model="password"
@@ -66,8 +66,7 @@ export default {
       try {
         const res = await login(this.username.trim(), this.password)
         uni.setStorageSync('token', res.data.token)
-        uni.setStorageSync('customerId', res.data.customerId || '')
-        uni.setStorageSync('memberLevel', res.data.memberLevel || '')
+        uni.setStorageSync('memberLevel', res.data.role || '')
         uni.showToast({ title: '登录成功', icon: 'success' })
         setTimeout(() => {
           uni.reLaunch({ url: '/pages/index/index' })
@@ -162,7 +161,7 @@ export default {
 }
 
 .input-icon {
-  font-size: 36rpx;
+  width: 36rpx; height: 36rpx;
   margin-right: 16rpx;
 }
 

@@ -2,6 +2,8 @@ package com.lhf.hotel.user.service.impl;
 
 import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.lhf.hotel.common.asserts.Assert;
+import com.lhf.hotel.common.constant.ErrorCode;
+import com.lhf.hotel.common.exception.BusinessException;
 import com.lhf.hotel.common.util.JwtUtil;
 import com.lhf.hotel.common.util.RedisUtil;
 import com.lhf.hotel.user.mapper.CustomerMapper;
@@ -58,7 +60,9 @@ public class AuthServiceImpl implements AuthService {
         // 2) 再查会员表（手机号作为登录凭证）
         Customer customer = customerMapper.selectOne(new LambdaQueryWrapper<Customer>()
                 .eq(Customer::getPhone, dto.getUsername()));
-        Assert.notNull(customer, "用户名或密码错误");
+        if (customer == null) {
+            throw new BusinessException(ErrorCode.BAD_REQUEST.getCode(), "用户名或密码错误");
+        }
         Assert.isTrue(customer.getStatus() == 1, "账号已被冻结");
         Assert.hasText(customer.getPassword(), "该账号尚未设置密码，请先注册");
         Assert.isTrue(passwordEncoder.matches(dto.getPassword(), customer.getPassword()), "用户名或密码错误");

@@ -3,10 +3,12 @@
 from __future__ import annotations
 
 import logging
+import mimetypes
 import shutil
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, UploadFile
+from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
 from api.deps import get_current_user, get_db
@@ -54,12 +56,23 @@ async def upload_files(
     db: Session = Depends(get_db),
     user: dict = Depends(get_current_user),
 ):
-    """上传一个或多个 PDF / DOCX / TXT 文件，解析入库并写入向量库。"""
+    """上传一个或多个 PDF / DOCX / TXT 文件，解析入库并写入向量库。
+
+    向量库（本地 Chroma）初始化失败时降级为「仅入库、未向量化」，避免整接口 500；
+    待向量库恢复后通过「重建向量库」补全向量。
+    """
     _require_admin(user)
     _ensure_files_dir()
 
-    store = get_vector_store()
+    # 初始化向量库；本地 Chroma 一般可用，失败时降级为仅入库
+    try:
+        store = get_vector_store()
+    except Exception:
+        logger.exception("向量库不可用，上传降级为仅入库（待向量库恢复后重建）")
+        store = None
+
     results: list[KnowledgeUploadResult] = []
+    vector_failed = 0
 
     for file in files:
         if not file.filename:
@@ -95,56 +108,74 @@ async def upload_files(
                 tmp_path.unlink()
             continue
 
-        # 检查重名 — 存在则先删除旧的向量和 DB 记录，实现覆盖上传
+        # 覆盖上传 — 先删除旧记录（向量库可用时一并删除旧向量）
         existing = db.query(KnowledgeDocument).filter(
             KnowledgeDocument.filename == file.filename
         ).first()
         if existing:
-            try:
-                store.delete(ids=_chunk_ids(existing.id, existing.chunk_count))
-            except Exception:
-                logger.exception("删除旧向量失败 doc_id=%s", existing.id)
+            if store is not None:
+                try:
+                    store.delete(ids=_chunk_ids(existing.id, existing.chunk_count))
+                except Exception:
+                    logger.exception("删除旧向量失败 doc_id=%s", existing.id)
             db.delete(existing)
             db.flush()
 
-        # 写入 DB
+        # 先入库（chunk_count 暂置 0，向量写入成功后再更新）
         doc = KnowledgeDocument(
             filename=file.filename,
             file_type=file_type,
             file_size=file_size,
             category=category,
-            chunk_count=len(chunks),
+            chunk_count=0,
         )
         db.add(doc)
         db.flush()
 
-        # 写入 Chroma
-        try:
-            ids = _chunk_ids(doc.id, len(chunks))
-            metadatas = [
-                {"doc_id": doc.id, "filename": file.filename, "chunk_index": i}
-                for i in range(len(chunks))
-            ]
-            store.add_texts(texts=chunks, metadatas=metadatas, ids=ids)
-        except Exception:
-            logger.exception("Chroma 写入失败 doc_id=%s", doc.id)
-            db.rollback()
-            if saved_path.exists():
-                saved_path.unlink()
-            continue
+        if store is not None:
+            try:
+                ids = _chunk_ids(doc.id, len(chunks))
+                metadatas = [
+                    {"doc_id": doc.id, "filename": file.filename, "chunk_index": i}
+                    for i in range(len(chunks))
+                ]
+                store.add_texts(texts=chunks, metadatas=metadatas, ids=ids)
+                doc.chunk_count = len(chunks)
+                db.commit()
+                db.refresh(doc)
+                results.append(KnowledgeUploadResult(
+                    id=doc.id,
+                    filename=doc.filename,
+                    file_type=doc.file_type,
+                    file_size=doc.file_size,
+                    chunk_count=doc.chunk_count,
+                ))
+            except Exception:
+                logger.exception("向量库写入失败 doc_id=%s", doc.id)
+                db.rollback()
+                if saved_path.exists():
+                    saved_path.unlink()
+                vector_failed += 1
+                continue
+        else:
+            # 向量库不可用：文件已落盘，标记为未向量化入库
+            db.commit()
+            db.refresh(doc)
+            results.append(KnowledgeUploadResult(
+                id=doc.id,
+                filename=doc.filename,
+                file_type=doc.file_type,
+                file_size=doc.file_size,
+                chunk_count=0,
+            ))
 
-        db.commit()
-        db.refresh(doc)
+    if results:
+        msg = f"成功上传 {len(results)} 个文件"
+        if vector_failed:
+            msg += f"，{vector_failed} 个因向量库暂不可用未向量化（恢复后请点「重建向量库」）"
+        return Result.ok(results, msg=msg)
 
-        results.append(KnowledgeUploadResult(
-            id=doc.id,
-            filename=doc.filename,
-            file_type=doc.file_type,
-            file_size=doc.file_size,
-            chunk_count=doc.chunk_count,
-        ))
-
-    return Result.ok(results, msg=f"成功上传 {len(results)} 个文件")
+    return Result.fail("未处理任何文件：请确认格式为 PDF/DOCX/TXT/MD 且内容非空")
 
 
 # ---------------------------------------------------------------------------
@@ -352,8 +383,79 @@ async def get_categories(
 
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Preview / download
 # ---------------------------------------------------------------------------
+
+# 已知扩展名与 MIME 类型映射（mimetypes 兜底可能不够准，显式修正）
+_MIME_TYPES = {
+    ".pdf": "application/pdf",
+    ".txt": "text/plain; charset=utf-8",
+    ".md": "text/plain; charset=utf-8",
+    ".docx": "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+    ".doc": "application/msword",
+}
+
+
+@router.get("/{doc_id}/preview", summary="预览/下载文档")
+async def preview_document(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    _require_admin(user)
+    doc = _get_or_404(db, doc_id)
+
+    file_path = _FILES_DIR / doc.filename
+    if not file_path.exists():
+        raise NotFoundError("文件已丢失")
+
+    ext = Path(doc.filename).suffix.lower()
+    media_type = _MIME_TYPES.get(ext) or (mimetypes.guess_type(str(file_path))[0] or "application/octet-stream")
+
+    return FileResponse(
+        str(file_path),
+        media_type=media_type,
+        filename=doc.filename,
+        content_disposition_type="inline",
+    )
+
+def _read_text_with_encoding_fallback(path: Path) -> str:
+    """以 UTF-8 优先读取，失败时回退 GBK/GB2312，最后 latin-1 兜底。"""
+    raw = path.read_bytes()
+    for enc in ("utf-8", "utf-8-sig", "gbk", "gb2312"):
+        try:
+            return raw.decode(enc)
+        except UnicodeDecodeError:
+            continue
+    return raw.decode("latin-1", errors="replace")
+
+
+@router.get("/{doc_id}/content", summary="获取文档文本内容（UTF-8）", response_model=Result[str])
+async def get_document_content(
+    doc_id: int,
+    db: Session = Depends(get_db),
+    user: dict = Depends(get_current_user),
+):
+    """返回文档 UTF-8 文本，用于前端 Markdown 渲染。自动处理 GBK 等旧编码。"""
+    _require_admin(user)
+    doc = _get_or_404(db, doc_id)
+
+    file_path = _FILES_DIR / doc.filename
+    if not file_path.exists():
+        raise NotFoundError("文件已丢失")
+
+    ext = Path(doc.filename).suffix.lower()
+    if ext not in {".md", ".txt", ".markdown"}:
+        raise ConflictError("仅支持文本类文档（MD/TXT）内容读取")
+
+    try:
+        text = _read_text_with_encoding_fallback(file_path)
+    except Exception as e:
+        logger.exception("读取文档内容失败 doc_id=%s", doc_id)
+        raise ConflictError(f"读取文件失败: {e}")
+
+    return Result.ok(text)
+
 
 def _get_or_404(db: Session, doc_id: int) -> KnowledgeDocument:
     doc = db.get(KnowledgeDocument, doc_id)

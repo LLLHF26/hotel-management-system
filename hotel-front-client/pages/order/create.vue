@@ -44,10 +44,6 @@
         <text class="form-label">手机号</text>
         <input class="form-input" v-model="form.guestPhone" type="number" placeholder="请输入手机号" maxlength="11" />
       </view>
-      <view class="form-item">
-        <text class="form-label">备注</text>
-        <input class="form-input" v-model="form.remark" placeholder="选填，如安静高层房间" />
-      </view>
     </view>
 
     <!-- actions -->
@@ -60,6 +56,8 @@
 
 <script>
 import { createOrder } from '../../src/api/order'
+import { getProfile } from '../../src/api/customer'
+import { getRoomTypeDetail } from '../../src/api/room'
 
 export default {
   data() {
@@ -72,7 +70,7 @@ export default {
       checkOut: '',
       guests: 2,
       coverImg: '',
-      form: { guestName: '', guestPhone: '', remark: '' },
+      form: { guestName: '', guestPhone: '' },
       submitting: false,
       defaultImg: '/static/lose.png'
     }
@@ -96,10 +94,32 @@ export default {
     this.guests = Number(options.guests) || 2
     this.price = Number(options.price) || 0
     this.roomCount = Number(options.roomCount) || 1
-    this.roomName = decodeURIComponent(options.roomName || '')
-    this.coverImg = decodeURIComponent(options.coverImg || '')
+    this.loadUserInfo()
+    // 如果 URL 参数没传房型名或封面图，用 roomTypeId 查接口回填
+    if (this.roomTypeId && (!this.roomName || !this.coverImg)) {
+      this.fetchRoomTypeFallback()
+    }
   },
   methods: {
+    async loadUserInfo() {
+      try {
+        const user = (await getProfile()).data || {}
+        if (user.realName) this.form.guestName = user.realName
+        if (user.phone) this.form.guestPhone = user.phone
+      } catch { /* ignore */ }
+    },
+    async fetchRoomTypeFallback() {
+      try {
+        const res = await getRoomTypeDetail(this.roomTypeId)
+        const rt = res.data || res || {}
+        if (!this.roomName && rt.name) this.roomName = rt.name
+        if (!this.coverImg) {
+          // 后端 RoomTypeVO 封面图字段为 coverImage，兼容 coverImg / imageUrl 等命名
+          const img = rt.coverImage || rt.coverImg || rt.imageUrl || rt.images?.[0] || ''
+          if (img) this.coverImg = img
+        }
+      } catch { /* ignore — 保持占位 */ }
+    },
     formatDate(d) {
       if (!d) return '-'
       const parts = d.split('-')
@@ -120,24 +140,34 @@ export default {
         return
       }
       this.submitting = true
+      uni.showLoading({ title: '正在预订...', mask: true })
       try {
-        const customerId = uni.getStorageSync('customerId')
+        // 注意：会员身份由后端从 token 解析（UserContext.getUserId()），前端无需也不能传递 customerId，
+        // 否则 19 位雪花 ID 经 JSON 精度丢失会变成另一个数，导致查不到会员。
         const res = await createOrder({
           roomTypeId: this.roomTypeId,
-          customerId: Number(customerId) || undefined,
           roomCount: this.roomCount,
           checkInDate: this.checkIn,
           checkOutDate: this.checkOut,
           guestName: this.form.guestName.trim(),
-          guestPhone: this.form.guestPhone,
-          remark: this.form.remark
+          guestPhone: this.form.guestPhone
         })
-        uni.showToast({ title: '预订成功', icon: 'success' })
-        setTimeout(() => {
-          uni.redirectTo({ url: '/pages/order/detail?id=' + (res.data && res.data.id) })
-        }, 800)
-      } catch {
-        // handled
+        // 兼容两种响应结构：{data:{id:x}} 或 {id:x}
+        // 订单 id 是后端以字符串返回的 19 位雪花 ID，必须保持字符串，避免 JS 精度丢失
+        const resultData = res.data || res
+        const orderId = String(resultData.id != null ? resultData.id : (resultData.orderNo || ''))
+        console.log('=== 创建订单返回 ===', JSON.stringify(res), '提取ID:', orderId)
+        if (!orderId) {
+          uni.hideLoading()
+          uni.showToast({ title: '订单创建异常，未获取到订单ID', icon: 'none' })
+          return
+        }
+        // 直接跳转详情页（不再 toast + 延迟等待，避免闪烁）
+        uni.hideLoading()
+        uni.redirectTo({ url: '/pages/order/detail?id=' + orderId })
+      } catch (err) {
+        const msg = (err && err.data && err.data.message) || '预订失败，请重试'
+        uni.showToast({ title: msg, icon: 'none' })
       } finally {
         this.submitting = false
       }

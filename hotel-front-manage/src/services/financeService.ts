@@ -3,7 +3,9 @@ import { authFetch } from './request'
 export async function getRevenueSummary() {
   try {
     const res = await authFetch('/api/finance/revenue/summary')
-    return await res.json()
+    const json = await res.json()
+    if (json?.code !== 200) throw new Error(json?.msg || 'revenue summary request failed')
+    return json
   } catch (e) {
     return {
       code: 200,
@@ -20,8 +22,9 @@ export async function getRevenueSummary() {
 export async function getDailyRevenue({ startDate, endDate }: { startDate: string, endDate: string }) {
   try {
     const res = await authFetch(`/api/finance/revenue/daily?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`)
-    // console.log('Daily revenue response:', await res.json())
-    return await res.json()
+    const json = await res.json()
+    if (json?.code !== 200) throw new Error(json?.msg || 'daily revenue request failed')
+    return json
   } catch (e) {
     const dates = ['2026-05-16','2026-05-17','2026-05-18','2026-05-19','2026-05-20','2026-05-21','2026-05-22']
     const roomRevenue = [15000,15800,16000,17000,17500,18000,18240]
@@ -34,8 +37,9 @@ export async function getDailyRevenue({ startDate, endDate }: { startDate: strin
 export async function getRevenueByRoomType({ startDate, endDate }: { startDate: string, endDate: string }) {
   try {
     const res = await authFetch(`/api/finance/revenue/by-room-type?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`)
-    // console.log('Revenue by room type response:', await res.json())
-    return await res.json()
+    const json = await res.json()
+    if (json?.code !== 200) throw new Error(json?.msg || 'revenue by room type request failed')
+    return json
   } catch (e) {
     return {
       code: 200,
@@ -54,7 +58,9 @@ export async function getRevenueByRoomType({ startDate, endDate }: { startDate: 
 export async function getOccupancyByType({ startDate, endDate }: { startDate: string, endDate: string }) {
   try {
     const res = await authFetch(`/api/finance/analysis/occupancy-by-type?startDate=${encodeURIComponent(startDate)}&endDate=${encodeURIComponent(endDate)}`)
-    return await res.json()
+    const json = await res.json()
+    if (json?.code !== 200) throw new Error(json?.msg || 'occupancy by type request failed')
+    return json
   } catch (e) {
     return {
       code: 200,

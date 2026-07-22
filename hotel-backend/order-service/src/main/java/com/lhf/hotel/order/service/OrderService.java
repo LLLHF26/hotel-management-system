@@ -2,6 +2,7 @@ package com.lhf.hotel.order.service;
 
 import com.lhf.hotel.common.result.PageResult;
 import com.lhf.hotel.order.model.dto.*;
+import com.lhf.hotel.order.model.vo.ProductOrderVO;
 import com.lhf.hotel.common.model.vo.ExtraVO;
 import com.lhf.hotel.common.model.vo.OrderVO;
 import com.lhf.hotel.common.model.vo.PaymentVO;
@@ -18,7 +19,7 @@ public interface OrderService {
 
     OrderVO getById(Long id);
 
-    Map<String, Object> create(OrderCreateDTO dto);
+    Map<String, Object> create(OrderCreateDTO dto, String idempotencyKey);
 
     void cancel(Long id, OrderCancelDTO dto);
 
@@ -55,4 +56,12 @@ public interface OrderService {
     int autoCancelExpired(int minutes);
 
     List<HotRoomTypeCountVO> getHotRoomTypeCounts(int topN, int days);
+
+    List<OrderVO> getRoomSchedule(Long roomId, String startDate, String endDate);
+
+    /** 客房商品下单（生成消费项并据积分比例抵扣） */
+    Map<String, Object> productOrder(Long id, ProductOrderDTO dto);
+
+    /** 最近客房商品订单（前台配送提醒，关联订单号/房间/客户） */
+    PageResult<ProductOrderVO> recentProductOrders(int page, int size);
 }

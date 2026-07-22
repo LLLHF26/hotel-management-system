@@ -7,7 +7,7 @@ export function formatDate(value?: string | null, fmt?: string): string {
   if (!value) return '-'
   const d = value.slice(0, 10)
   if (!fmt) return d
-  const [y, m, day] = d.split('-')
+  const [, m, day] = d.split('-')
   if (fmt === 'MM/DD') return `${m}/${day}`
   if (fmt === 'YYYY-MM-DD HH:mm') {
     const t = value.length > 10 ? value.slice(11, 16) : ''

@@ -31,7 +31,7 @@ public class RoomTypeServiceImpl implements RoomTypeService {
     }
 
     @Override
-    @Cacheable(value = "roomTypes", key = "#page + ':' + #size",
+    @Cacheable(value = "roomTypeList", key = "#page + ':' + #size",
                condition = "!T(org.springframework.util.StringUtils).hasText(#keyword) && !T(org.springframework.util.StringUtils).hasText(#bedType)")
     public PageResult<RoomTypeVO> list(int page, int size, String keyword, String bedType) {
         LambdaQueryWrapper<RoomType> wrapper = new LambdaQueryWrapper<>();
@@ -45,13 +45,13 @@ public class RoomTypeServiceImpl implements RoomTypeService {
 
         Page<RoomType> result = mapper.selectPage(new Page<>(page, size), wrapper);
         List<RoomTypeVO> records = result.getRecords().stream()
-                .map(e -> RoomConverters.toRoomTypeVO(e, false))
+                .map(e -> RoomConverters.toRoomTypeVO(e, true))
                 .toList();
         return PageResult.of(result.getTotal(), page, size, records);
     }
 
     @Override
-    @Cacheable(value = "roomType", key = "#id")
+    @Cacheable(value = "roomTypeDetail", key = "#id")
     public RoomTypeVO getById(Long id) {
         RoomType entity = mapper.selectById(id);
         Assert.notNull(entity, "房型不存在");
@@ -59,7 +59,7 @@ public class RoomTypeServiceImpl implements RoomTypeService {
     }
 
     @Override
-    @CacheEvict(value = {"roomTypes", "roomType"}, allEntries = true)
+    @CacheEvict(value = {"roomTypeList", "roomTypeDetail"}, allEntries = true)
     public Long create(RoomTypeSaveDTO dto) {
         RoomType entity = new RoomType();
         entity.setName(dto.getName());
@@ -77,7 +77,7 @@ public class RoomTypeServiceImpl implements RoomTypeService {
     }
 
     @Override
-    @CacheEvict(value = {"roomTypes", "roomType"}, allEntries = true)
+    @CacheEvict(value = {"roomTypeList", "roomTypeDetail"}, allEntries = true)
     public void update(Long id, RoomTypeSaveDTO dto) {
         RoomType entity = mapper.selectById(id);
         Assert.notNull(entity, "房型不存在");
@@ -95,7 +95,7 @@ public class RoomTypeServiceImpl implements RoomTypeService {
     }
 
     @Override
-    @CacheEvict(value = {"roomTypes", "roomType"}, allEntries = true)
+    @CacheEvict(value = {"roomTypeList", "roomTypeDetail"}, allEntries = true)
     public void delete(Long id) {
         Assert.notNull(mapper.selectById(id), "房型不存在");
         long roomCount = roomMapper.selectCount(

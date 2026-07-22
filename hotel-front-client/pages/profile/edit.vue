@@ -6,7 +6,7 @@
         <text class="section-label">头像</text>
         <view class="avatar-box" @click="handleChangeAvatar">
           <image v-if="form.avatar" class="avatar-img" :src="form.avatar" mode="aspectFill"></image>
-          <text v-else class="avatar-icon">👤</text>
+          <image v-else class="avatar-icon-img" src="/static/icons/user.png" mode="aspectFit"></image>
           <text class="avatar-hint">{{ form.avatar ? '更换头像' : '点击上传' }}</text>
         </view>
       </view>
@@ -134,6 +134,7 @@ export default {
   background: #E8E8E8;
 }
 .avatar-icon { font-size: 60rpx; }
+.avatar-icon-img { width: 60rpx; height: 60rpx; }
 .avatar-hint { font-size: 22rpx; color: #999; margin-top: 4rpx; }
 
 .form-item {

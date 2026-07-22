@@ -6,13 +6,11 @@ function getToken() {
 
 export async function authFetch(input: string, init: RequestInit = {}) {
   const token = getToken()
-  const headers = {
-    ...(init.headers || {}),
-    ...(token ? { Authorization: `Bearer ${token}` } : {})
-  }
-
   return fetch(`${BASE}${input}`, {
     ...init,
-    headers
+    headers: {
+      ...(init.headers || {}),
+      ...(token ? { Authorization: `Bearer ${token}` } : {})
+    }
   })
 }

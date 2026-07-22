@@ -13,6 +13,8 @@ from core.auth import ROLE_ADMIN, ForbiddenError
 from core.exceptions import NotFoundError
 from models.alert import Alert, AlertRule
 from schemas.alert import (
+    AlertBatchDeleteRequest,
+    AlertBatchReadRequest,
     AlertRuleCreate,
     AlertRuleUpdate,
     AlertRuleVO,
@@ -46,6 +48,35 @@ async def alert_status(
     )
 
 
+@router.put("/read-all", summary="标记全部已读", response_model=Result[None])
+async def mark_all_read(db: Session = Depends(get_db)):
+    db.query(Alert).filter(Alert.is_read == False).update({"is_read": True})
+    db.commit()
+    return Result.ok(msg="已全部标记为已读")
+
+
+@router.put("/read-batch", summary="批量标记已读", response_model=Result[None])
+async def batch_read(
+    body: AlertBatchReadRequest,
+    db: Session = Depends(get_db),
+):
+    if body.ids:
+        db.query(Alert).filter(Alert.id.in_(body.ids), Alert.is_read == False).update({"is_read": True})
+        db.commit()
+    return Result.ok(msg=f"已标记 {len(body.ids)} 条为已读")
+
+
+@router.delete("/batch", summary="批量删除告警", response_model=Result[None])
+async def batch_delete(
+    body: AlertBatchDeleteRequest,
+    db: Session = Depends(get_db),
+):
+    if body.ids:
+        db.query(Alert).filter(Alert.id.in_(body.ids)).delete(synchronize_session=False)
+        db.commit()
+    return Result.ok(msg=f"已删除 {len(body.ids)} 条告警")
+
+
 @router.put("/{alert_id}/read", summary="标记告警已读", response_model=Result[None])
 async def mark_read(alert_id: int, db: Session = Depends(get_db)):
     alert = db.get(Alert, alert_id)
@@ -56,11 +87,14 @@ async def mark_read(alert_id: int, db: Session = Depends(get_db)):
     return Result.ok(msg="已标记为已读")
 
 
-@router.put("/read-all", summary="标记全部已读", response_model=Result[None])
-async def mark_all_read(db: Session = Depends(get_db)):
-    db.query(Alert).filter(Alert.is_read == False).update({"is_read": True})
+@router.delete("/{alert_id}", summary="删除单条告警", response_model=Result[None])
+async def delete_alert(alert_id: int, db: Session = Depends(get_db)):
+    alert = db.get(Alert, alert_id)
+    if not alert:
+        raise NotFoundError(f"告警 {alert_id} 不存在")
+    db.delete(alert)
     db.commit()
-    return Result.ok(msg="已全部标记为已读")
+    return Result.ok(msg="告警已删除")
 
 
 @router.post("/rule", summary="配置告警规则", response_model=Result[dict])

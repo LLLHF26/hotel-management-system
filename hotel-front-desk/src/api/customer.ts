@@ -1,30 +1,16 @@
 import { request } from './request'
-import type { CustomerListParams, CustomerVO, PageResult } from '@/types'
+import type { CustomerVO, PageResult } from '@/types'
 
-export function getCustomerList(params: CustomerListParams) {
+/** 会员列表（前台按手机号/姓名识别老客，驱动散客转会员） */
+export function getCustomerList(params: {
+  page?: number
+  size?: number
+  keyword?: string
+  memberLevel?: string
+} = {}) {
   return request<PageResult<CustomerVO>>({
     url: '/api/customer/list',
     method: 'GET',
-    params,
-  })
-}
-
-export function getCustomerDetail(id: number) {
-  return request<CustomerVO>({
-    url: `/api/customer/${id}`,
-    method: 'GET',
-  })
-}
-
-export function registerCustomer(data: {
-  realName: string
-  phone: string
-  idCard?: string
-  gender?: number
-}) {
-  return request<{ id: number }>({
-    url: '/api/customer/register',
-    method: 'POST',
-    data,
+    params: { page: 1, size: 20, ...params },
   })
 }

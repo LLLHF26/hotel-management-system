@@ -10,7 +10,7 @@ USE hotel_finance;
 
 -- 1. 日结营收表
 CREATE TABLE daily_revenue (
-    id                BIGINT        NOT NULL AUTO_INCREMENT  COMMENT '主键',
+    id                BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键（应用层雪花算法，DB层自增兜底）',
     date              DATE          NOT NULL                 COMMENT '统计日期',
     room_revenue      DECIMAL(12,2) NOT NULL DEFAULT 0.00    COMMENT '房费收入',
     extra_revenue     DECIMAL(12,2) NOT NULL DEFAULT 0.00    COMMENT '其他消费收入',
@@ -29,7 +29,7 @@ CREATE TABLE daily_revenue (
 
 -- 2. 退款记录表
 CREATE TABLE refund_record (
-    id              BIGINT        NOT NULL AUTO_INCREMENT  COMMENT '主键',
+    id              BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键（应用层雪花算法，DB层自增兜底）',
     order_id        BIGINT        NOT NULL                 COMMENT '订单 ID',
     order_no        VARCHAR(32)   NOT NULL                 COMMENT '订单编号',
     payment_id      BIGINT        DEFAULT NULL             COMMENT '原支付记录 ID',

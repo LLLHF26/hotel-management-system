@@ -11,7 +11,7 @@ import java.time.LocalDateTime;
 @TableName("orders")
 public class Orders {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private String orderNo;
     private Long customerId;
@@ -34,6 +34,9 @@ public class Orders {
     private String status;
     private String source;
     private String remark;
+
+    @Version
+    private Integer version;
 
     @TableField(fill = FieldFill.INSERT)
     private LocalDateTime createTime;

@@ -10,7 +10,7 @@ USE hotel_room;
 
 -- 1. 房型表
 CREATE TABLE room_type (
-    id          BIGINT          NOT NULL AUTO_INCREMENT  COMMENT '主键',
+    id          BIGINT          NOT NULL AUTO_INCREMENT COMMENT '主键（应用层雪花算法，DB层自增兜底）',
     name        VARCHAR(64)     NOT NULL                 COMMENT '房型名称',
     description VARCHAR(256)    DEFAULT NULL             COMMENT '简要描述',
     area        INT             DEFAULT NULL             COMMENT '面积（㎡）',
@@ -29,12 +29,14 @@ CREATE TABLE room_type (
 
 -- 2. 房间表
 CREATE TABLE room (
-    id            BIGINT        NOT NULL AUTO_INCREMENT  COMMENT '主键',
+    id            BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键（应用层雪花算法，DB层自增兜底）',
     room_number   VARCHAR(16)   NOT NULL                 COMMENT '房间编号',
     room_type_id  BIGINT        NOT NULL                 COMMENT '房型 ID',
     floor         INT           DEFAULT NULL             COMMENT '楼层',
     status        VARCHAR(16)   NOT NULL DEFAULT '空闲中' COMMENT '维修中/空闲中/预订中/入住中/打扫中/待清洁中',
+    price         DECIMAL(10,2) DEFAULT NULL             COMMENT '价格（元/晚，为空时继承房型标准价）',
     description   VARCHAR(128)  DEFAULT NULL             COMMENT '备注',
+    version       INT           NOT NULL DEFAULT 0       COMMENT '乐观锁版本号',
     is_deleted    TINYINT       NOT NULL DEFAULT 0       COMMENT '逻辑删除',
     create_time   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP,
     update_time   DATETIME      NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -46,8 +48,8 @@ CREATE TABLE room (
 
 -- 3. 打扫任务表
 CREATE TABLE cleaning_task (
-    id            BIGINT        NOT NULL AUTO_INCREMENT  COMMENT '主键',
-    room_id       BIGINT        NOT NULL                 COMMENT '房间 ID',
+    id            BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键（应用层雪花算法，DB层自增兜底）',
+    room_id       BIGINT        NOT NULL COMMENT '房间 ID',
     room_number   VARCHAR(16)   NOT NULL                 COMMENT '房间号（冗余）',
     cleaner_id    BIGINT        NOT NULL                 COMMENT '保洁员 ID',
     cleaner_name  VARCHAR(32)   NOT NULL                 COMMENT '保洁员姓名（冗余）',
@@ -64,8 +66,8 @@ CREATE TABLE cleaning_task (
 
 -- 4. 维修记录表
 CREATE TABLE maintenance_record (
-    id            BIGINT        NOT NULL AUTO_INCREMENT  COMMENT '主键',
-    room_id       BIGINT        NOT NULL                 COMMENT '房间 ID',
+    id            BIGINT        NOT NULL AUTO_INCREMENT COMMENT '主键（应用层雪花算法，DB层自增兜底）',
+    room_id       BIGINT        NOT NULL COMMENT '房间 ID',
     room_number   VARCHAR(16)   NOT NULL                 COMMENT '房间号（冗余）',
     reason        VARCHAR(256)  NOT NULL                 COMMENT '维修原因',
     status        VARCHAR(16)   NOT NULL DEFAULT '维修中' COMMENT '维修中/已完成',
@@ -85,27 +87,27 @@ INSERT INTO room_type (id, name, description, area, bed_type, max_guests, price,
 (3, '行政套房',   '60㎡，独立客厅+卧室，江景',   60, '大床', 2, 988.00, 'WiFi,空调,浴缸,客厅,智能音箱', 3),
 (4, '经济单人间', '20㎡，独立卫浴',              20, '单床', 1, 288.00, 'WiFi,空调',                     4);
 
-INSERT INTO room (room_number, room_type_id, floor, status) VALUES
+INSERT INTO room (room_number, room_type_id, floor, status, price) VALUES
 -- 3F 豪华大床房 (5间)
-('301', 1, 3, '空闲中'),
-('302', 1, 3, '空闲中'),
-('303', 1, 3, '空闲中'),
-('304', 1, 3, '空闲中'),
-('305', 1, 3, '空闲中'),
+('301', 1, 3, '空闲中', 588.00),
+('302', 1, 3, '空闲中', 588.00),
+('303', 1, 3, '空闲中', 588.00),
+('304', 1, 3, '空闲中', 588.00),
+('305', 1, 3, '空闲中', 588.00),
 -- 4F 商务双床房 (5间)
-('401', 2, 4, '空闲中'),
-('402', 2, 4, '空闲中'),
-('403', 2, 4, '空闲中'),
-('404', 2, 4, '空闲中'),
-('405', 2, 4, '空闲中'),
+('401', 2, 4, '空闲中', 488.00),
+('402', 2, 4, '空闲中', 488.00),
+('403', 2, 4, '空闲中', 488.00),
+('404', 2, 4, '空闲中', 488.00),
+('405', 2, 4, '空闲中', 488.00),
 -- 5F 行政套房 (3间)
-('501', 3, 5, '空闲中'),
-('502', 3, 5, '空闲中'),
-('503', 3, 5, '空闲中'),
+('501', 3, 5, '空闲中', 988.00),
+('502', 3, 5, '空闲中', 988.00),
+('503', 3, 5, '空闲中', 988.00),
 -- 6F 经济单人间 (6间)
-('601', 4, 6, '空闲中'),
-('602', 4, 6, '空闲中'),
-('603', 4, 6, '空闲中'),
-('604', 4, 6, '空闲中'),
-('605', 4, 6, '空闲中'),
-('606', 4, 6, '空闲中');
+('601', 4, 6, '空闲中', 288.00),
+('602', 4, 6, '空闲中', 288.00),
+('603', 4, 6, '空闲中', 288.00),
+('604', 4, 6, '空闲中', 288.00),
+('605', 4, 6, '空闲中', 288.00),
+('606', 4, 6, '空闲中', 288.00);

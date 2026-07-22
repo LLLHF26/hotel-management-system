@@ -11,7 +11,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 @EnableDiscoveryClient
 @EnableFeignClients(basePackages = {"com.lhf.hotel.common.feign", "com.lhf.hotel.order.feign"})
 @EnableScheduling
-@MapperScan("com.lhf.hotel.order.mapper")
+@MapperScan({"com.lhf.hotel.order.mapper", "com.lhf.hotel.order.model.mapper"})
 public class OrderApplication {
 
     public static void main(String[] args) {

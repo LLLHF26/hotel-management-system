@@ -9,7 +9,7 @@ import java.time.LocalDateTime;
 @TableName("cleaning_task")
 public class CleaningTask {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private Long roomId;
     private String roomNumber;

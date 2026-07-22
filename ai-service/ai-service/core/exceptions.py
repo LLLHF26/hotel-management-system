@@ -40,3 +40,7 @@ class LLMError(AppException):
 class GatewayError(AppException):
     def __init__(self, message: str = "Java 服务调用失败") -> None:
         super().__init__(message, code=500, status_code=500)
+
+
+class GatewayRetryableError(GatewayError):
+    """网关 5xx / 网络层错误，可触发重试与熔断。"""

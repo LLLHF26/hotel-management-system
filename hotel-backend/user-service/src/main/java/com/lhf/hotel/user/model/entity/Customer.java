@@ -10,7 +10,7 @@ import java.time.LocalDateTime;
 @TableName("customer")
 public class Customer {
 
-    @TableId(type = IdType.AUTO)
+    @TableId(type = IdType.ASSIGN_ID)
     private Long id;
     private String realName;
     private String idCard;

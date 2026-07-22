@@ -17,7 +17,7 @@ from sse_starlette.sse import EventSourceResponse
 from api.deps import get_current_user, get_db
 from agents.chat_agent import create_chat_agent
 from core.context import RequestContext, set_request_context
-from core.vector_store import similarity_search
+from core.vector_store import async_similarity_search
 from models.chat_log import ChatLog
 from schemas.chat import (
     ChatFeedbackRequest,
@@ -83,7 +83,7 @@ async def chat_stream(request: Request, body: ChatRequest):
         ))
         session_id = body.session_id or f"sess_{uuid.uuid4().hex[:12]}"
         try:
-            knowledge_results = similarity_search(body.message, k=3)
+            knowledge_results = await async_similarity_search(body.message, k=3)
             knowledge_context = "\n".join(
                 item.get("content", "") for item in knowledge_results
             )
@@ -111,11 +111,14 @@ async def chat_stream(request: Request, body: ChatRequest):
                     yield {"event": "tool", "data": event.get("name", "")}
 
             reply = "".join(reply_parts)
-            _save_chat_log_sync(
-                user.get("customer_id"), session_id, "user", body.message, intent
+            # 将同步 DB 写入移出事件循环（避免阻塞其他请求）
+            await asyncio.to_thread(
+                _save_chat_log_sync,
+                user.get("customer_id"), session_id, "user", body.message, intent,
             )
-            _save_chat_log_sync(
-                user.get("customer_id"), session_id, "assistant", reply, intent
+            await asyncio.to_thread(
+                _save_chat_log_sync,
+                user.get("customer_id"), session_id, "assistant", reply, intent,
             )
             yield {"event": "done", "data": json.dumps({
                 "session_id": session_id,
@@ -137,7 +140,7 @@ async def chat_sync(
 ):
     session_id = body.session_id or f"sess_{uuid.uuid4().hex[:12]}"
 
-    knowledge_results = similarity_search(body.message, k=3)
+    knowledge_results = await async_similarity_search(body.message, k=3)
     knowledge_context = "\n".join(
         item.get("content", "") for item in knowledge_results
     )
@@ -145,15 +148,19 @@ async def chat_sync(
     intent = _classify_intent(body.message)
     chat_history = _build_history(body.history)
 
-    agent = create_chat_agent()
-    result = await agent.ainvoke(
-        {
-            "input": body.message,
-            "knowledge_context": knowledge_context,
-            "chat_history": chat_history,
-        }
-    )
-    reply = result.get("output", "")
+    try:
+        agent = create_chat_agent()
+        result = await agent.ainvoke(
+            {
+                "input": body.message,
+                "knowledge_context": knowledge_context,
+                "chat_history": chat_history,
+            }
+        )
+        reply = result.get("output", "")
+    except Exception:
+        logger.exception("同步对话异常")
+        return Result.fail("大模型调用失败，请稍后重试")
 
     _save_chat_log(
         db, user.get("customer_id"), session_id, "user", body.message, intent

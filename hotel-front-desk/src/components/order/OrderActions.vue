@@ -20,15 +20,61 @@
   </el-dialog>
 
   <!-- 办理退房 -->
-  <el-dialog v-model="checkOutVisible" title="办理退房" width="420px" destroy-on-close>
+  <el-dialog v-model="checkOutVisible" title="办理退房" width="520px" destroy-on-close>
     <el-form label-width="100px">
       <el-form-item label="退还押金">
         <el-input-number v-model="refundDeposit" :min="0" :precision="2" style="width: 100%" />
       </el-form-item>
     </el-form>
+
+    <el-divider content-position="left">本单商品 / 服务消费</el-divider>
+    <div v-loading="extrasLoading" class="checkout-extra">
+      <el-empty v-if="!extras.length" description="暂无额外消费" :image-size="48" />
+      <el-table v-else :data="extras" size="small" style="width: 100%; margin-bottom: 8px">
+        <el-table-column prop="itemName" label="项目" min-width="130" />
+        <el-table-column label="单价" width="78">
+          <template #default="{ row }">&yen;{{ formatMoney(row.amount) }}</template>
+        </el-table-column>
+        <el-table-column prop="quantity" label="数量" width="56" align="center" />
+        <el-table-column label="小计" width="92">
+          <template #default="{ row }">&yen;{{ formatMoney(row.subtotal ?? row.amount * (row.quantity || 1)) }}</template>
+        </el-table-column>
+      </el-table>
+
+      <div class="settle-row">
+        <span>消费合计：<b class="amount-strong">&yen;{{ formatMoney(extraSum) }}</b></span>
+        <span class="outstanding">
+          待支付：<b :class="outstanding > 0 ? 'amount-danger' : 'amount-ok'">&yen;{{ formatMoney(outstanding) }}</b>
+        </span>
+      </div>
+
+      <el-button
+        v-if="outstanding > 0"
+        type="warning"
+        :loading="loading"
+        style="width: 100%; margin-top: 8px"
+        @click="settleOutstanding"
+      >
+        结算待付消费 ¥{{ formatMoney(outstanding) }}
+      </el-button>
+      <el-alert
+        v-else-if="extras.length"
+        type="success"
+        :closable="false"
+        show-icon
+        title="商品 / 服务消费已结清"
+        style="margin-top: 8px"
+      />
+    </div>
+
     <template #footer>
       <el-button @click="checkOutVisible = false">取消</el-button>
-      <el-button type="primary" :loading="loading" @click="submitCheckOut">确认退房</el-button>
+      <el-button
+        type="primary"
+        :loading="loading"
+        :disabled="outstanding > 0"
+        @click="submitCheckOut"
+      >确认退房</el-button>
     </template>
   </el-dialog>
 
@@ -46,8 +92,27 @@
   </el-dialog>
 
   <!-- 换房 -->
-  <el-dialog v-model="changeRoomVisible" title="换房" width="480px" destroy-on-close>
+  <el-dialog v-model="changeRoomVisible" title="换房" width="520px" destroy-on-close>
+    <el-descriptions v-if="order" :column="1" border size="small" style="margin-bottom: 16px">
+      <el-descriptions-item label="订单号">{{ order.orderNo }}</el-descriptions-item>
+      <el-descriptions-item label="当前房间">{{ order.roomTypeName }} {{ order.roomNumber }}</el-descriptions-item>
+      <el-descriptions-item label="原入住日期">{{ dateRangeLabel(order.checkInDate, order.checkOutDate) }}</el-descriptions-item>
+    </el-descriptions>
+
     <el-form label-width="90px">
+      <el-form-item label="换房时段">
+        <el-date-picker
+          v-model="changeDateRange"
+          type="daterange"
+          range-separator="至"
+          start-placeholder="起始日期"
+          end-placeholder="结束日期"
+          value-format="YYYY-MM-DD"
+          :clearable="true"
+          style="width: 100%"
+        />
+        <div class="form-tip">不选则默认整个订单期间换房</div>
+      </el-form-item>
       <el-form-item label="新房间">
         <el-select v-model="newRoomId" placeholder="选择空闲房间" filterable style="width: 100%">
           <el-option
@@ -122,17 +187,19 @@
 </template>
 
 <script setup lang="ts">
-import { ref } from 'vue'
+import { computed, ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import type { OrderVO, RoomVO } from '@/types'
+import type { ExtraVO, OrderVO, RoomVO } from '@/types'
 import {
+  addExtra,
+  cancelOrder,
+  changeRoom,
   checkIn,
   checkOut,
   extendOrder,
-  changeRoom,
+  getOrderDetail,
+  getOrderExtras,
   pay,
-  cancelOrder,
-  addExtra,
 } from '@/api/order'
 import { getRoomList } from '@/api/room'
 import { formatMoney, dateRangeLabel } from '@/utils/format'
@@ -142,6 +209,8 @@ const emit = defineEmits<{ success: [] }>()
 
 const order = ref<OrderVO | null>(null)
 const loading = ref(false)
+const extras = ref<ExtraVO[]>([])
+const extrasLoading = ref(false)
 
 const checkInVisible = ref(false)
 const checkOutVisible = ref(false)
@@ -155,6 +224,7 @@ const deposit = ref(500)
 const refundDeposit = ref(500)
 const extendDays = ref(1)
 const newRoomId = ref<number>()
+const changeDateRange = ref<[string, string] | null>(null)
 const availableRooms = ref<RoomVO[]>([])
 const payAmount = ref(0)
 const payMethod = ref('CASH')
@@ -162,6 +232,22 @@ const cancelReason = ref('客户要求取消')
 const extraItem = ref('')
 const extraQty = ref(1)
 const extraPrice = ref(15)
+
+/** 本单商品/服务消费合计 */
+const extraSum = computed(() =>
+  (extras.value || []).reduce(
+    (sum, e) => sum + (Number(e.subtotal ?? 0) || Number(e.amount) * (Number(e.quantity) || 1)),
+    0,
+  ),
+)
+
+/** 退房前仍需支付的金额（房款 + 商品/服务消费 - 已付） */
+const outstanding = computed(() => {
+  if (!order.value) return 0
+  const total = Number(order.value.totalAmount ?? 0)
+  const paid = Number(order.value.paidAmount ?? 0)
+  return Math.max(0, total - paid)
+})
 
 async function loadAvailableRooms() {
   const res = await getRoomList({ status: '空闲中', page: 1, size: 200 })
@@ -178,6 +264,24 @@ function openCheckOut(row: OrderVO) {
   order.value = row
   refundDeposit.value = Number(row.deposit ?? 500)
   checkOutVisible.value = true
+  loadCheckOutData(row.id)
+}
+
+/** 拉取最新订单金额与商品/服务消费明细，用于退房前结算校验 */
+async function loadCheckOutData(id: number) {
+  extrasLoading.value = true
+  try {
+    const [detail, extrasRes] = await Promise.all([
+      getOrderDetail(id),
+      getOrderExtras(id),
+    ])
+    if (detail) order.value = detail
+    extras.value = Array.isArray(extrasRes) ? extrasRes : []
+  } catch {
+    extras.value = []
+  } finally {
+    extrasLoading.value = false
+  }
 }
 
 function openExtend(row: OrderVO) {
@@ -189,6 +293,10 @@ function openExtend(row: OrderVO) {
 async function openChangeRoom(row: OrderVO) {
   order.value = row
   newRoomId.value = undefined
+  // 默认填入订单的入住/退房日期
+  changeDateRange.value = (row.checkInDate && row.checkOutDate)
+    ? [row.checkInDate, row.checkOutDate]
+    : null
   await loadAvailableRooms()
   changeRoomVisible.value = true
 }
@@ -198,6 +306,12 @@ function openPay(row: OrderVO) {
   payAmount.value = Number(row.totalAmount ?? 0) - Number(row.paidAmount ?? 0)
   payMethod.value = 'CASH'
   payVisible.value = true
+}
+
+/** 退房场景下结算待付的商品 / 服务消费 */
+function settleOutstanding() {
+  if (!order.value) return
+  openPay(order.value)
 }
 
 function openCancel(row: OrderVO) {
@@ -229,6 +343,13 @@ async function submitCheckIn() {
 
 async function submitCheckOut() {
   if (!order.value) return
+  // 退房前必须先结清本单的商品/服务消费
+  if (outstanding.value > 0) {
+    ElMessage.warning(
+      `请先结算本单待支付的商品 / 服务消费（¥${formatMoney(outstanding.value)}）后再办理退房`,
+    )
+    return
+  }
   loading.value = true
   try {
     await checkOut(order.value.id, refundDeposit.value)
@@ -258,9 +379,10 @@ async function submitChangeRoom() {
     ElMessage.warning('请选择新房间')
     return
   }
+  const [startDate, endDate] = changeDateRange.value ?? []
   loading.value = true
   try {
-    await changeRoom(order.value.id, newRoomId.value)
+    await changeRoom(order.value.id, newRoomId.value, startDate, endDate)
     ElMessage.success('换房成功')
     changeRoomVisible.value = false
     emit('success')
@@ -276,6 +398,10 @@ async function submitPay() {
     await pay(order.value.id, payAmount.value, payMethod.value)
     ElMessage.success('支付成功')
     payVisible.value = false
+    // 若在退房场景中结算，刷新待付金额，便于解除退房限制
+    if (checkOutVisible.value) {
+      await loadCheckOutData(order.value.id)
+    }
     emit('success')
   } finally {
     loading.value = false
@@ -325,3 +451,40 @@ defineExpose({
   openExtra,
 })
 </script>
+
+<style scoped>
+.form-tip {
+  font-size: 12px;
+  color: #94a3b8;
+  margin-top: 4px;
+}
+
+.checkout-extra {
+  padding: 0 2px;
+  min-height: 60px;
+}
+
+.settle-row {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 13px;
+  color: #475569;
+  margin-top: 4px;
+}
+
+.amount-strong {
+  color: #d97706;
+  font-size: 14px;
+}
+
+.amount-danger {
+  color: #dc2626;
+  font-size: 14px;
+}
+
+.amount-ok {
+  color: #16a34a;
+  font-size: 14px;
+}
+</style>

@@ -4,6 +4,7 @@ import com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.lhf.hotel.common.asserts.Assert;
 import com.lhf.hotel.common.dto.RoomStatusChangeDTO;
+import com.lhf.hotel.common.exception.BusinessException;
 import com.lhf.hotel.common.enums.RoomStatus;
 import com.lhf.hotel.common.result.PageResult;
 import com.lhf.hotel.room.mapper.CleaningTaskMapper;
@@ -72,13 +73,15 @@ public class RoomServiceImpl implements RoomService {
         long exists = roomMapper.selectCount(
                 new LambdaQueryWrapper<Room>().eq(Room::getRoomNumber, dto.getRoomNumber()));
         Assert.isTrue(exists == 0, "房间编号已存在");
-        Assert.notNull(roomTypeMapper.selectById(dto.getRoomTypeId()), "房型不存在");
+        RoomType roomType = roomTypeMapper.selectById(dto.getRoomTypeId());
+        Assert.notNull(roomType, "房型不存在");
 
         Room room = new Room();
         room.setRoomNumber(dto.getRoomNumber());
         room.setRoomTypeId(dto.getRoomTypeId());
         room.setFloor(dto.getFloor());
         room.setDescription(dto.getDescription());
+        room.setPrice(dto.getPrice() != null ? dto.getPrice() : roomType.getPrice());
         room.setStatus(RoomStatus.空闲中.name());
         roomMapper.insert(room);
         return room.getId();
@@ -97,9 +100,14 @@ public class RoomServiceImpl implements RoomService {
             room.setRoomNumber(dto.getRoomNumber());
         }
         if (dto.getRoomTypeId() != null) {
-            Assert.notNull(roomTypeMapper.selectById(dto.getRoomTypeId()), "房型不存在");
+            RoomType roomType = roomTypeMapper.selectById(dto.getRoomTypeId());
+            Assert.notNull(roomType, "房型不存在");
             room.setRoomTypeId(dto.getRoomTypeId());
+            if (dto.getPrice() == null) {
+                room.setPrice(roomType.getPrice());
+            }
         }
+        if (dto.getPrice() != null) room.setPrice(dto.getPrice());
         if (dto.getFloor() != null) room.setFloor(dto.getFloor());
         if (dto.getDescription() != null) room.setDescription(dto.getDescription());
         roomMapper.updateById(room);
@@ -174,7 +182,10 @@ public class RoomServiceImpl implements RoomService {
         }
 
         room.setStatus(target.name());
-        roomMapper.updateById(room);
+        int affected = roomMapper.updateById(room);
+        if (affected == 0) {
+            throw new BusinessException(409, "房间 " + room.getRoomNumber() + " 状态已被其他请求修改，请重试");
+        }
     }
 
     private PageResult<RoomVO> queryRooms(int page, int size, Long roomTypeId, String status,

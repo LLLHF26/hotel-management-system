@@ -1,5 +1,16 @@
 <template>
-  <view class="detail-page" v-if="order">
+  <!-- 订单不存在 -->
+  <view class="detail-page empty-state" v-if="order && !order.id">
+    <view class="empty-icon-wrap">
+      <image class="empty-icon" src="/static/icons/document.png" mode="aspectFit"></image>
+    </view>
+    <text class="empty-title">订单不存在</text>
+    <text class="empty-desc">该订单可能未创建成功或已被删除</text>
+    <button class="back-btn" @click="goBack">返回</button>
+  </view>
+
+  <!-- 正常订单详情 -->
+  <view class="detail-page" v-else-if="order">
     <!-- header -->
     <view class="detail-header">
       <text class="order-no">{{ order.orderNo }}</text>
@@ -10,16 +21,16 @@
     <view class="info-card">
       <view class="card-title">房型信息</view>
       <view class="info-item">
-        <text>🏨 {{ order.roomTypeName || '-' }}</text>
+        <image class="info-icon" src="/static/icons/hotel.png" mode="aspectFit"></image><text>{{ order.roomTypeName || '-' }}</text>
       </view>
       <view class="info-item">
-        <text>📅 入住 {{ order.checkInDate }}（14:00后）</text>
+        <image class="info-icon" src="/static/icons/calendar.png" mode="aspectFit"></image><text>入住 {{ order.checkInDate }}（14:00后）</text>
       </view>
       <view class="info-item">
-        <text>📅 退房 {{ order.checkOutDate }}（12:00前）</text>
+        <image class="info-icon" src="/static/icons/calendar.png" mode="aspectFit"></image><text>退房 {{ order.checkOutDate }}（12:00前）</text>
       </view>
       <view class="info-item">
-        <text>🌙 共{{ order.nights || computeNights }}晚</text>
+        <image class="info-icon" src="/static/icons/moon.png" mode="aspectFit"></image><text>共{{ order.nights || computeNights }}晚</text>
       </view>
     </view>
 
@@ -97,14 +108,28 @@ export default {
     }
   },
   onLoad(options) {
-    if (options.id) this.loadDetail(options.id)
+    const id = options.id || options.orderNo || ''
+    console.log('=== 详情页收到参数 ===', JSON.stringify(options), '查询ID:', id)
+    if (id) this.loadDetail(id)
+    else this.order = {} // 触发空状态显示
   },
   methods: {
     async loadDetail(id) {
       try {
         const res = await getMyOrderDetail(id)
-        this.order = res.data || res
-      } catch { /* ignore */ }
+        const data = res.data || res
+        console.log('=== 订单详情返回 ===', JSON.stringify(data), '有id:', !!data.id)
+        this.order = data
+        // 如果后端返回了空对象（无 id），视为订单不存在
+        if (!data || !data.id) {
+          this.order = {}
+        }
+      } catch (err) {
+        console.log('=== 订单详情异常 ===', err)
+        this.order = {}
+        const msg = (err && err.msg) || (err && err.data && err.data.message) || '订单信息加载失败'
+        uni.showToast({ title: msg, icon: 'none', duration: 2000 })
+      }
     },
     handleCancel() {
       uni.showModal({
@@ -122,6 +147,11 @@ export default {
       })
     },
     handlePay() {
+      if (!this.order || !this.order.id) {
+        uni.showToast({ title: '订单信息不完整，无法支付', icon: 'none' })
+        return
+      }
+      console.log('=== 发起支付 ===', 'orderId:', this.order.id, 'amount:', this.order.totalAmount)
       const methods = ['微信支付', '支付宝', '银行卡']
       uni.showActionSheet({
         itemList: methods,
@@ -143,6 +173,9 @@ export default {
           })
         }
       })
+    },
+    goBack() {
+      uni.navigateBack({ fail: () => uni.switchTab({ url: '/pages/order/list' }) })
     }
   }
 }
@@ -153,6 +186,31 @@ export default {
   background: #F5F6FA;
   min-height: 100vh;
   padding-bottom: 48rpx;
+
+  &.empty-state {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding-top: 300rpx;
+  }
+}
+
+.empty-icon-wrap {
+  width: 120rpx; height: 120rpx; border-radius: 50%;
+  background: linear-gradient(135deg, #F0F0F0, #E8E8E8);
+  display: flex; align-items: center; justify-content: center;
+  margin-bottom: 28rpx;
+}
+.empty-icon { width: 56rpx; height: 56rpx; opacity: .4; }
+.empty-title { font-size: 34rpx; font-weight: 600; color: #333; margin-bottom: 12rpx; }
+.empty-desc { font-size: 26rpx; color: #999; margin-bottom: 40rpx; }
+.back-btn {
+  width: 240rpx; height: 80rpx; line-height: 80rpx; text-align: center;
+  background: linear-gradient(135deg, #C9A96E, #D4B87A); color: #FFF;
+  font-size: 28rpx; font-weight: 600; border-radius: 40rpx;
+  border: none;
+  &::after { border: none; }
 }
 
 .detail-header {
@@ -188,10 +246,12 @@ export default {
 }
 
 .info-item {
+  display: flex; align-items: center; gap: 8rpx;
   font-size: 28rpx;
   color: #555;
   line-height: 2;
 }
+.info-icon { width: 28rpx; height: 28rpx; }
 
 .price-row {
   display: flex;

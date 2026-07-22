@@ -1,13 +1,13 @@
 :root {
-  --fd-primary: #1e3a5f;
-  --fd-primary-light: #2d5a8a;
-  --fd-sidebar-bg: #1e2532;
-  --fd-sidebar-active: #2b3444;
-  --fd-sidebar-text: #94a3b8;
+  --fd-primary: #111827;
+  --fd-primary-light: #1f2937;
+  --fd-sidebar-bg: #0f0f0f;
+  --fd-sidebar-active-bg: rgba(255, 255, 255, 0.08);
+  --fd-sidebar-text: #9ca3af;
   --fd-sidebar-text-active: #ffffff;
-  --fd-bg: #f5f7fa;
+  --fd-bg: #f8f9fa;
   --fd-card: #ffffff;
-  --fd-border: #e8ecf1;
+  --fd-border: #f0f0f0;
   --fd-success: #10b981;
   --fd-warning: #f59e0b;
   --fd-danger: #ef4444;
@@ -30,7 +30,7 @@ body,
 
 .page-header {
   display: flex;
-  align-items: center;
+  align-items: flex-end;
   justify-content: space-between;
   margin-bottom: 20px;
 }
@@ -38,8 +38,14 @@ body,
 .page-header h2 {
   margin: 0;
   font-size: 22px;
-  font-weight: 600;
+  font-weight: 700;
   color: #111827;
+}
+
+.page-header .page-subtitle {
+  font-size: 13px;
+  color: #94a3b8;
+  margin-top: 4px;
 }
 
 .stat-cards {
@@ -57,7 +63,7 @@ body,
 
 .stat-card {
   background: var(--fd-card);
-  border-radius: 12px;
+  border-radius: 16px;
   padding: 20px;
   border: 1px solid var(--fd-border);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
@@ -106,15 +112,17 @@ body,
   margin-bottom: 16px;
   padding: 16px 20px;
   background: var(--fd-card);
-  border-radius: 12px;
+  border-radius: 16px;
   border: 1px solid var(--fd-border);
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .content-card {
   background: var(--fd-card);
-  border-radius: 12px;
+  border-radius: 16px;
   border: 1px solid var(--fd-border);
   padding: 20px;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
 .room-status-空闲中 { border-left: 4px solid #22c55e; }
@@ -138,4 +146,26 @@ body,
 }
 ::-webkit-scrollbar-thumb:hover {
   background: #a0aab8;
+}
+
+/* ====== Element Plus 样式覆盖 ====== */
+.el-button--primary {
+  --el-button-bg-color: #111827;
+  --el-button-border-color: #111827;
+  --el-button-hover-bg-color: #1f2937;
+  --el-button-hover-border-color: #1f2937;
+  --el-button-active-bg-color: #0b1220;
+  --el-button-active-border-color: #0b1220;
+  --el-button-text-color: #ffffff;
+  color: #ffffff;
+}
+
+.el-input__wrapper {
+  border-radius: 10px;
+}
+
+.el-table th.el-table__cell {
+  background-color: #f8f9fa;
+  color: #374151;
+  font-weight: 600;
 }

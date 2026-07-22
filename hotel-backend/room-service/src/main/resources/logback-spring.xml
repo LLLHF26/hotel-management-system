@@ -9,16 +9,19 @@
         </encoder>
     </appender>
 
-    <appender name="KAFKA" class="com.lhf.hotel.common.logging.KafkaLogbackAppender">
-        <topic>logs-topic</topic>
-        <bootstrapServers>${kafkaBootstrapServers}</bootstrapServers>
-        <appName>${appName}</appName>
-    </appender>
-
     <root level="INFO">
         <appender-ref ref="CONSOLE"/>
-        <appender-ref ref="KAFKA"/>
     </root>
 
-    <logger name="org.apache.kafka" level="WARN"/>
+    <springProfile name="kafka-logging">
+        <appender name="KAFKA" class="com.lhf.hotel.common.logging.KafkaLogbackAppender">
+            <topic>logs-topic</topic>
+            <bootstrapServers>${kafkaBootstrapServers}</bootstrapServers>
+            <appName>${appName}</appName>
+        </appender>
+        <root level="INFO">
+            <appender-ref ref="KAFKA"/>
+        </root>
+        <logger name="org.apache.kafka" level="WARN"/>
+    </springProfile>
 </configuration>

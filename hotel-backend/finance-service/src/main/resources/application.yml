@@ -6,28 +6,45 @@ spring:
     name: finance-service
   datasource:
     url: jdbc:mysql://localhost:3306/hotel_finance?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true
-    username: root
-    password: root
     driver-class-name: com.mysql.cj.jdbc.Driver
     type: com.alibaba.druid.pool.DruidDataSource
+    druid:
+      initial-size: 10
+      min-idle: 10
+      max-active: 50
+      max-wait: 3000
+      validation-query: SELECT 1
+      test-on-borrow: true
+      test-while-idle: true
+      time-between-eviction-runs-millis: 30000
+      min-evictable-idle-time-millis: 600000
+      filters: stat,wall
   data:
     redis:
       host: localhost
-      password: root
       port: 6379
   cloud:
+    loadbalancer:
+      retry:
+        enabled: false
+    sentinel:
+      eager: false
+      transport:
+        dashboard: localhost:8080
     nacos:
       discovery:
         server-addr: localhost:8848
       config:
-        enabled: false
-        import-check:
-          enabled: false
+        server-addr: localhost:8848
+        file-extension: yml
+        group: DEFAULT_GROUP
+  config:
+    import:
+      - optional:nacos:common.yml
+      - nacos:finance-service.yml
   rabbitmq:
     host: localhost
     port: 5672
-    username: admin
-    password: admin
     listener:
       simple:
         retry:

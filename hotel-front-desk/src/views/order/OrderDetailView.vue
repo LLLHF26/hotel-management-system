@@ -163,9 +163,6 @@
             <el-button v-if="order.status === '已入住'" round plain @click="actions?.openChangeRoom(order)">
               <el-icon><RefreshRight /></el-icon> 换房
             </el-button>
-            <el-button v-if="order.status === '已入住'" round plain @click="actions?.openExtra(order)">
-              <el-icon><Plus /></el-icon> 添加消费
-            </el-button>
             <el-divider v-if="order.status === '待支付'" />
             <el-button
               v-if="order.status === '待支付'"
@@ -198,7 +195,7 @@ import { onMounted, ref } from 'vue'
 import {
   ArrowLeft, Document, User, OfficeBuilding, Coin,
   CreditCard, SetUp, CircleCheck, SwitchButton,
-  Clock, RefreshRight, Plus,
+  Clock, RefreshRight,
 } from '@element-plus/icons-vue'
 import { useRoute } from 'vue-router'
 import type { OrderVO } from '@/types'
@@ -214,7 +211,12 @@ const order = ref<OrderVO | null>(null)
 onMounted(() => loadDetail())
 
 async function loadDetail() {
-  const id = Number(route.params.id)
+  const raw = route.params.id
+  // route.params.id 类型为 string | string[]，订单 ID 取第一个元素
+  const id = Array.isArray(raw) ? raw[0] : raw
+  // 注意：id 是 URL 路径参数（字符串），19 位雪花 ID 不能用 Number() 转换，
+  // 否则 JS 双精度浮点会精度丢失导致后端查不到订单。直接以字符串传给 API 即可，
+  // 后端 @PathVariable Long 能从字符串精确还原，且 order-service JacksonConfig 已将 Long 序列化为字符串。
   if (!id) return
   loading.value = true
   try {

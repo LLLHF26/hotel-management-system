@@ -16,6 +16,8 @@ import Alerts from './pages/Alerts.vue'
 import Knowledge from './pages/Knowledge.vue'
 import Settings from './pages/Settings.vue'
 import Profile from './pages/Profile.vue'
+import Products from './pages/Products.vue'
+import ServiceRequests from './pages/ServiceRequests.vue'
 
 const routes = [
   { path: '/', redirect: '/admin/dashboard' },
@@ -36,7 +38,9 @@ const routes = [
       { path: 'alerts', component: Alerts },
       { path: 'knowledge', component: Knowledge },
       { path: 'settings', component: Settings },
-      { path: 'profile', component: Profile }
+      { path: 'profile', component: Profile },
+      { path: 'products', component: Products },
+      { path: 'service-requests', component: ServiceRequests }
     ]
   }
 ]

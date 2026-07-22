@@ -16,7 +16,9 @@ export async function getCustomerList(params: {
     })
     const query = queryParams.toString() ? `?${queryParams.toString()}` : ''
     const res = await authFetch(`/api/customer/list${query}`)
-    return await res.json()
+    const json = await res.json()
+    if (json?.code !== 200) throw new Error(json?.msg || 'customer list request failed')
+    return json
   } catch (e) {
     return {
       code: 200,
@@ -91,7 +93,9 @@ export async function getUserList(params: {
     })
     const query = queryParams.toString() ? `?${queryParams.toString()}` : ''
     const res = await authFetch(`/api/user/list${query}`)
-    return await res.json()
+    const json = await res.json()
+    if (json?.code !== 200) throw new Error(json?.msg || 'user list request failed')
+    return json
   } catch (e) {
     return {
       code: 200,

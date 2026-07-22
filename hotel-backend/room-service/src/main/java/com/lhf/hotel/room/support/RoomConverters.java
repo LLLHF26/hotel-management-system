@@ -69,7 +69,7 @@ public final class RoomConverters {
                 .roomTypeName(roomType != null ? roomType.getName() : "")
                 .floor(room.getFloor())
                 .status(room.getStatus())
-                .price(roomType != null ? roomType.getPrice() : null)
+                .price(room.getPrice() != null ? room.getPrice() : (roomType != null ? roomType.getPrice() : null))
                 .description(room.getDescription())
                 .createTime(room.getCreateTime())
                 .updateTime(room.getUpdateTime())
